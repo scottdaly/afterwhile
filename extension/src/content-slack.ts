@@ -102,8 +102,9 @@ function scrollContainer(): HTMLElement | null {
   const list = Array.from(document.querySelectorAll<HTMLElement>(selectors.messageList))
     .find((el) => !el.closest(selectors.threadPane));
   if (!(list instanceof HTMLElement)) return null;
+  const rows = Array.from(list.querySelectorAll<HTMLElement>(selectors.message));
   return [list, ...Array.from(list.querySelectorAll<HTMLElement>("*"))]
-    .find((el) => el.scrollHeight > el.clientHeight + 8) ?? list;
+    .find((el) => rows.length > 0 && !el.closest(selectors.message) && rows.every((row) => el.contains(row)) && el.scrollHeight > el.clientHeight + 8) ?? list;
 }
 
 function schedule(delay: number): void {

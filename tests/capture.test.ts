@@ -309,4 +309,17 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     other.onSend = null;
     expect(await other.send({ type: "scroll-lock", op: "acquire", site: "slack" }, { tab: { id: 3, incognito: false } })).toEqual({ ok: true });
   });
+
+  test("a scrollable code block is not the history container", async () => {
+    const h = make(page(row(100, "<pre>Synthetic long code</pre>")), { hidden: true });
+    h.height = h.visibleHeight;
+    const code = h.dom.document.querySelector("pre")!;
+    let codeTop = 100;
+    Object.defineProperties(code, {
+      clientHeight: { value: 100 }, scrollHeight: { value: 500 },
+      scrollTop: { get: () => codeTop, set: (value: number) => { codeTop = value; } },
+    });
+    await h.start(); await h.clock.advance(350);
+    expect(codeTop).toBe(100);
+  });
 });
