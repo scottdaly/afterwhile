@@ -1,0 +1,128 @@
+:root {
+  color-scheme: light;
+  --ink: #1c1915;
+  --muted: #5e574e;
+  --line: #e2d9cc;
+  --paper: #f6f1e8;
+  --card: #fffdf8;
+  --green: #1f6b4a;
+  --green-ink: #e7f4ec;
+  --warn: #8a3b12;
+  --warn-bg: #fde8dc;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 360px;
+  padding: 16px 16px 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.4 "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+header { margin-bottom: 12px; }
+
+.wordmark {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.tagline {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+section {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.title { margin: 6px 0 0; font-weight: 650; }
+
+.url, .meta, .coverage, .hint, footer {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.today { margin: 6px 0 0; font-size: 16px; }
+
+.error {
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.card { padding-top: 12px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+li + li { margin-top: 4px; }
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { border-color: #c9bfb0; }
+
+.toggle[aria-pressed="true"] {
+  background: var(--green);
+  color: var(--green-ink);
+  border-color: var(--green);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actions button { width: 100%; border-radius: 10px; }
+
+.danger { color: var(--warn); }
+
+footer { border-top: 1px solid var(--line); padding-top: 10px; }

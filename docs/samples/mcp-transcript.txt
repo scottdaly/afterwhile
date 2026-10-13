@@ -1,0 +1,83 @@
+MCP transcript
+client: transcript-client via @modelcontextprotocol/sdk StdioClientTransport
+server: afterwhile mcp
+database: synthetic Slack fixtures (channel, older history, one edit)
+
+-> tools/call search {"query":"focus states","connection":"slack","sourceId":"slack:T024BE7LD:C01ABCD2EFG","since":"2026-10-12T00:00:00.000Z","until":"2026-10-12T23:59:59.000Z","limit":20}
+<-
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-12T16:20:00.000Z · Alex Kim
+We should revisit the Input focus states before Thursday.
+id slack:T024BE7LD:C01ABCD2EFG:1791822000.000100
+
+-> tools/call search {"query":"focus ring","connection":"slack","since":"2026-10-11T00:00:00.000Z","until":"2026-10-11T23:59:59.000Z"}
+<-
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-11T18:05:00.000Z · Sam Patel
+Yesterday we left the focus ring on the secondary button unresolved.
+id slack:T024BE7LD:C01ABCD2EFG:1791741900.000300
+
+-> tools/call recent {"connection":"slack","checkpoint":true}
+<-
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-12T16:25:00.000Z · Jordan Lee
+Agreed. The ring is too faint on the secondary button.
+id slack:T024BE7LD:C01ABCD2EFG:1791822300.000200
+
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-12T16:20:00.000Z · Alex Kim
+We should revisit the Input focus states before Thursday.
+id slack:T024BE7LD:C01ABCD2EFG:1791822000.000100
+
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-11T18:05:00.000Z · Sam Patel
+Yesterday we left the focus ring on the secondary button unresolved.
+id slack:T024BE7LD:C01ABCD2EFG:1791741900.000300
+
+-> tools/call recent {"connection":"slack","checkpoint":true}
+<-
+No matching records.
+
+-> tools/call get {"sourceId":"slack:T024BE7LD:C01ABCD2EFG"}
+<-
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-11T18:05:00.000Z · Sam Patel
+Yesterday we left the focus ring on the secondary button unresolved.
+id slack:T024BE7LD:C01ABCD2EFG:1791741900.000300
+
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-12T16:20:00.000Z · Alex Kim
+We should revisit the Input focus states before Thursday.
+id slack:T024BE7LD:C01ABCD2EFG:1791822000.000100
+
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+2026-10-12T16:25:00.000Z · Jordan Lee
+Agreed. The ring is too faint on the secondary button.
+id slack:T024BE7LD:C01ABCD2EFG:1791822300.000200
+
+-> tools/call sources {"connection":"slack"}
+<-
+#design-foundations
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+id slack:T024BE7LD:C01ABCD2EFG
+records 3
+last 2026-10-12T18:04:00.000Z
+coverage partial (load budget reached)
+
+-> tools/call coverage {"sourceId":"slack:T024BE7LD:C01ABCD2EFG"}
+<-
+#design-foundations is only partly saved (load budget reached). Open it and scroll to capture more.
+https://app.slack.com/client/T024BE7LD/C01ABCD2EFG
+have 3
+expected unknown
+complete false
+reason load budget reached
+

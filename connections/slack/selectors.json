@@ -1,0 +1,22 @@
+{
+  "messageList": "[data-qa='virtual-list']",
+  "message": "[data-qa='virtual-list-item']",
+  "messageText": ".p-rich_text_section",
+  "timestamp": "[data-ts]",
+  "timestampAttr": "data-ts",
+  "author": "[data-qa='message_sender_name']",
+  "authorIdAttr": "data-user-id",
+  "threadReplies": "[data-qa='thread_replies']",
+  "edited": "[data-qa='message_edited']",
+  "channelName": "[data-qa='channel-name']",
+  "channelHeader": "[data-qa='channel_header']",
+  "dmIndicator": "[data-qa='dm_channel_name']",
+  "privateChannelLock": "[data-qa='channel-lock-icon']",
+  "threadPane": "[data-qa='threads_flexpane']",
+  "threadTsAttr": "data-thread-ts",
+  "beginning": "[data-qa='beginning-banner']",
+  "captcha": "[data-qa='captcha']",
+  "errorBanner": "[data-qa='banner_error']",
+  "login": "[data-qa='signin_form']",
+  "shell": "[data-qa='client_loading'], [data-qa='virtual-list'], [data-qa='channel_header'], [data-qa='signin_form']"
+}

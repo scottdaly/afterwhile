@@ -1,0 +1,24 @@
+{
+  "id": "slack",
+  "version": "0.1.0",
+  "title": "Slack",
+  "sites": [{ "match": "https://app.slack.com/*" }],
+  "kinds": ["message", "thread_reply"],
+  "fields": {
+    "threadTs": "string or null",
+    "replyCount": "number",
+    "edited": "boolean"
+  },
+  "pace": {
+    "reveal": true,
+    "loadBudget": 20,
+    "hourlyLoadBudget": 100,
+    "oldestDays": 30
+  },
+  "defaults": { "enabled": false },
+  "risks": [
+    "Saves visible Slack messages from channels you open.",
+    "Your workspace may not allow copying messages or giving them to AI tools.",
+    "Saved messages stay on this computer, readable by tools you connect."
+  ]
+}

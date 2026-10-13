@@ -1,0 +1,8 @@
+node_modules/
+.demo/
+dist/
+extension/dist/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
