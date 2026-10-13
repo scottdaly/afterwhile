@@ -50,11 +50,38 @@ test("insert cursor keeps increasing after forget removes every record", () => {
 
 test("legacy records and time checkpoints migrate without skipping history", () => {
   const db = database(); db.insertRecords([record(0), record(1)]);
+  db.insertRecords([record(2), record(2, { deleted: true, text: "" })]);
+  db.updateCoverage({ sourceId: record().source.id, expected: null, have: 2, gaps: [], complete: false, reason: "load budget reached", updatedAt: "2026-10-12T17:00:00Z" });
   db.recent({ client: "legacy", checkpoint: true });
   const columns = (db.db.query("PRAGMA table_info(records)").all() as Array<{ name: string }>).map((column) => column.name).filter((name) => name !== "ingest_seq");
-  db.db.run(`CREATE TABLE legacy_records AS SELECT ${columns.join(", ")} FROM records ORDER BY ingest_seq`);
+  // The actual 0cb32ac schema, including its primary key and named indexes.
+  db.db.run(`CREATE TABLE legacy_records (
+    record_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    connection TEXT NOT NULL,
+    connection_version TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    source_title TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    position INTEGER,
+    occurred_at TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    occurred_day TEXT NOT NULL,
+    captured_day TEXT NOT NULL,
+    author_name TEXT,
+    author_id TEXT,
+    text TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (record_id, revision)
+  )`);
+  db.db.run(`INSERT INTO legacy_records SELECT ${columns.join(", ")} FROM records ORDER BY ingest_seq`);
   db.db.run("DROP TABLE records");
   db.db.run("ALTER TABLE legacy_records RENAME TO records");
+  db.db.run("CREATE INDEX idx_records_source ON records(source_id, occurred_at)");
+  db.db.run("CREATE INDEX idx_records_connection ON records(connection, occurred_at)");
+  db.db.run("CREATE INDEX idx_records_captured_day ON records(captured_day)");
   db.db.run("ALTER TABLE checkpoints DROP COLUMN cursor_seq");
   const filename = path.join(open[0]!.root, "records.db");
   db.close();
@@ -62,8 +89,19 @@ test("legacy records and time checkpoints migrate without skipping history", () 
   expect(migrated.recent({ client: "legacy", checkpoint: true, limit: 1 }).map((item) => item.id)).toEqual([record(0).id]);
   expect(migrated.recent({ client: "legacy", checkpoint: true, limit: 1 }).map((item) => item.id)).toEqual([record(1).id]);
   expect(migrated.recent({ client: "legacy", checkpoint: true })).toEqual([]);
+  expect(migrated.search("Synthetic")).toHaveLength(2);
+  expect(migrated.revisions(record(2).id).map((item) => item.deleted)).toEqual([false, true]);
+  expect(migrated.coverage(record().source.id)?.reason).toBe("load budget reached");
+  const indexes = (migrated.db.query("PRAGMA index_list(records)").all() as Array<{ name: string }>).map((item) => item.name);
+  expect(indexes).toContain("idx_records_source");
+  expect(indexes).toContain("idx_records_connection");
+  expect(indexes).toContain("idx_records_captured_day");
   migrated.insertRecords([record(0, { text: "Edit after migration" })]);
   expect(migrated.revisions(record().id).map((item) => item.revision)).toEqual([1, 2]);
+  migrated.close();
+  const reopened = new RecordDatabase(filename); open[0]!.db = reopened;
+  expect(reopened.recent({ client: "legacy", checkpoint: true }).map((item) => item.text)).toEqual(["Edit after migration"]);
+  expect(reopened.recent({ client: "legacy", checkpoint: true })).toEqual([]);
 });
 
 test("search, recent and get compare ISO offsets as instants, including stored offsets", () => {

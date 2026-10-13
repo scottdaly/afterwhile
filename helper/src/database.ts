@@ -90,12 +90,10 @@ export class RecordDatabase {
     this.db.run(recordSchema);
     const columns = this.db.query("PRAGMA table_info(records)").all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "ingest_seq")) {
-      this.db.transaction(() => {
-        this.db.run("ALTER TABLE records RENAME TO records_before_cursor");
-        this.db.run(recordSchema);
-        this.db.run("INSERT INTO records SELECT NULL, * FROM records_before_cursor ORDER BY rowid");
-        this.db.run("DROP TABLE records_before_cursor");
-      }).immediate();
+      this.db.run("ALTER TABLE records RENAME TO records_before_cursor");
+      this.db.run(recordSchema);
+      this.db.run("INSERT INTO records SELECT NULL, * FROM records_before_cursor ORDER BY rowid");
+      this.db.run("DROP TABLE records_before_cursor");
     }
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_records_source ON records(source_id, occurred_at)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_records_connection ON records(connection, occurred_at)`);
