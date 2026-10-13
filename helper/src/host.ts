@@ -7,10 +7,10 @@ import { filesDir } from "./paths.ts";
 
 export function handleHostMessage(db: RecordDatabase, filesRoot: string, message: unknown): unknown {
   if (!message || typeof message !== "object") return { type: "error", message: "empty message" };
-  const body = message as { type?: string; records?: unknown; coverage?: Coverage; scope?: string; id?: string };
+  const body = message as { type?: string; batchId?: string; records?: unknown; coverage?: Coverage; scope?: string; id?: string };
   if (body.type === "records" && Array.isArray(body.records)) {
     const result = acceptRecords(db, filesRoot, body.records);
-    return { type: "ack", ...result, ids: result.ids };
+    return { type: "ack", batchId: body.batchId, ...result, ids: result.ids };
   }
   if (body.type === "coverage" && body.coverage && typeof body.coverage.sourceId === "string") {
     acceptCoverage(db, body.coverage);

@@ -13,7 +13,8 @@ export interface AcceptResult extends InsertSummary {
 export function acceptRecords(db: RecordDatabase, filesRoot: string, records: unknown[]): AcceptResult {
   const valid = records.filter(isCaptureRecord);
   const summary = db.insertRecords(valid);
-  refreshRecords(db, filesRoot, summary.ids);
+  // A retry may follow a crash after SQLite committed but before Markdown was written.
+  refreshRecords(db, filesRoot, valid.map((record) => record.id));
   log(
     `records new=${summary.inserted} revisions=${summary.revisions} deleted=${summary.deleted} unchanged=${summary.unchanged} rejected=${records.length - valid.length} ids=${summary.ids.join(",")}`,
   );

@@ -11,6 +11,18 @@ const slackLock = new SiteScrollLock();
 let port: chrome.runtime.Port | null = null;
 let reconnectTimer: number | null = null;
 const queue: CaptureRecord[] = [];
+let helperReady = false;
+let inFlight: { batchId: string; records: CaptureRecord[] } | null = null;
+// Serialise storage updates so an ack cannot overwrite a newly queued batch.
+let pendingWork = chrome.storage.local.get("pendingRecords").then((stored) => {
+  if (Array.isArray(stored.pendingRecords)) queue.push(...stored.pendingRecords);
+});
+
+function updateQueue(work: () => Promise<void>): Promise<void> {
+  const result = pendingWork.then(work);
+  pendingWork = result.catch((error) => console.error(`queue ${String(error)}`));
+  return result;
+}
 
 function badge(on: boolean): void {
   chrome.action.setBadgeText({ text: on ? "ON" : "" });
@@ -30,8 +42,7 @@ async function ensureSlackScript(enabled: boolean): Promise<void> {
     if (has) await chrome.scripting.unregisterContentScripts({ ids: [id] });
     return;
   }
-  if (has) return;
-  await chrome.scripting.registerContentScripts([
+  if (!has) await chrome.scripting.registerContentScripts([
     {
       id,
       matches: ["https://app.slack.com/*"],
@@ -40,6 +51,11 @@ async function ensureSlackScript(enabled: boolean): Promise<void> {
       persistAcrossSessions: true,
     },
   ]);
+  const tabs = await chrome.tabs.query({ url: "https://app.slack.com/*" });
+  await Promise.all(tabs.filter((tab) => !tab.incognito && tab.id != null).map((tab) =>
+    chrome.scripting.executeScript({ target: { tabId: tab.id! }, files: ["content-slack.js"] })
+      .catch(() => undefined), // A tab can navigate or close between query and injection.
+  ));
 }
 
 function rememberHelper(connected: boolean): void {
@@ -47,10 +63,13 @@ function rememberHelper(connected: boolean): void {
 }
 
 function flush(): void {
-  if (!port || queue.length === 0) return;
-  const batch = queue.splice(0, queue.length);
-  for (const chunk of chunkRecords(batch)) {
-    port.postMessage({ type: "records", records: chunk });
+  if (!port || !helperReady || inFlight || queue.length === 0) return;
+  const records = chunkRecords(queue)[0]!;
+  inFlight = { batchId: crypto.randomUUID(), records };
+  try {
+    port.postMessage({ type: "records", ...inFlight });
+  } catch {
+    port.disconnect();
   }
 }
 
@@ -63,25 +82,41 @@ function connectNative(): void {
     scheduleReconnect();
     return;
   }
-  port.onMessage.addListener((message: { type?: string; todayCount?: number; message?: string }) => {
+  const currentPort = port;
+  rememberHelper(false);
+  port.onMessage.addListener((message: { type?: string; batchId?: string; todayCount?: number; message?: string }) => {
+    if (port !== currentPort) return;
+    helperReady = true;
+    rememberHelper(true);
     if (typeof message.todayCount === "number") {
       chrome.storage.local.set({ todayCount: message.todayCount, helperConnected: true });
     }
     if (message.type === "error") {
       console.error(`helper ${message.message ?? "error"}`);
+      currentPort.disconnect();
+      return;
     }
+    void updateQueue(async () => {
+      if (message.type === "ack" && inFlight && message.batchId === inFlight.batchId) {
+        queue.splice(0, inFlight.records.length);
+        await chrome.storage.local.set({ pendingRecords: queue.slice() });
+        inFlight = null;
+      }
+      flush();
+    });
   });
   port.onDisconnect.addListener(() => {
+    if (port !== currentPort) return;
     port = null;
+    helperReady = false;
+    inFlight = null;
     rememberHelper(false);
     if (chrome.runtime.lastError) {
       console.error(`helper disconnected ${chrome.runtime.lastError.message ?? ""}`);
     }
     scheduleReconnect();
   });
-  rememberHelper(true);
   port.postMessage({ type: "stats" });
-  flush();
 }
 
 function scheduleReconnect(): void {
@@ -99,10 +134,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   connectNative();
   if (message?.type === "records" && Array.isArray(message.records)) {
-    queue.push(...(message.records as CaptureRecord[]));
-    flush();
-    sendResponse({ ok: true });
-    return false;
+    updateQueue(async () => {
+      queue.push(...(message.records as CaptureRecord[]));
+      await chrome.storage.local.set({ pendingRecords: queue.slice() });
+      flush();
+    }).then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
   }
   if (message?.type === "coverage") {
     port?.postMessage({ type: "coverage", coverage: message.coverage as Coverage });
@@ -156,15 +194,20 @@ chrome.storage.onChanged.addListener(() => {
   refreshBadge().catch(() => undefined);
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({
+chrome.runtime.onInstalled.addListener(async () => {
+  const defaults = {
     slackEnabled: false,
     paused: false,
     includeDms: false,
     includePrivate: false,
     todayCount: 0,
     helperConnected: false,
-  });
+  };
+  const stored = await chrome.storage.local.get(Object.keys(defaults));
+  await chrome.storage.local.set(Object.fromEntries(
+    Object.entries(defaults).filter(([key]) => stored[key] === undefined),
+  ));
+  await ensureSlackScript(Boolean(stored.slackEnabled));
   chrome.idle.setDetectionInterval(30);
   connectNative();
   refreshBadge().catch(() => undefined);

@@ -39,7 +39,7 @@ test("compiled helper accepts Chrome's native-host launch arguments and ingests 
     ]);
     expect({ code, diagnostics: code ? stderr : "" }).toEqual({ code: 0, diagnostics: "" });
     expect(stdout.byteLength).toBeLessThan(1024 * 1024);
-    expect(new NativeDecoder().push(Buffer.from(stdout))[0]).toMatchObject({ type: "ack", inserted: 1 });
+    expect(new NativeDecoder().push(Buffer.from(stdout))[0]).toMatchObject({ type: "ack", batchId: "launch-test", inserted: 1 });
     const db = new RecordDatabase(path.join(temp, "data", "records.db"));
     try { expect(db.getSource(record.source.id)[0]?.text).toBe(record.text); }
     finally { db.close(); }
