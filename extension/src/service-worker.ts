@@ -205,9 +205,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "forget") {
-    port?.postMessage({ type: "forget", scope: message.scope, id: message.id });
-    sendResponse({ ok: Boolean(port) });
-    return false;
+    if (!port || !helperReady || !["source", "connection"].includes(message.scope) || typeof message.id !== "string") {
+      sendResponse({ ok: false, message: "Connect the helper and try again." });
+      return false;
+    }
+    updateQueue(async () => {
+      const remaining = queue.filter((record) => (message.scope === "source" ? record.source.id : record.connection) !== message.id);
+      await chrome.storage.local.set({ pendingRecords: remaining });
+      queue.splice(0, queue.length, ...remaining);
+      // Native messages are ordered: forget follows the outstanding record batch.
+      inFlight = null;
+      if (!port || !helperReady) throw new Error("helper disconnected");
+      port.postMessage({ type: "forget", scope: message.scope, id: message.id });
+      flush();
+    }).then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false, message: "Could not forget saved records. Try again." }));
+    return true;
   }
   return false;
 });

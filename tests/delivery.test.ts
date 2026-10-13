@@ -160,3 +160,20 @@ test("navigating the holder tab releases its site lock", async () => {
   h.tabUpdates.emit(1, { status: "loading" }, { id: 1, url: "https://example.invalid/" });
   expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" }, { tab: { id: 3, incognito: false } })).toEqual({ ok: true });
 });
+
+test("forget cancels unacked records so a worker restart cannot resurrect them", async () => {
+  const h = make(undefined, { hostMode: "drop-ack" }); await h.start();
+  expect(h.storage.pendingRecords).toHaveLength(2);
+  h.hostMode = "healthy";
+  expect(await h.send({ type: "forget", scope: "source", id: SOURCE_ID })).toEqual({ ok: true });
+  await h.clock.advance(0);
+  expect(h.storage.pendingRecords).toEqual([]);
+  await h.startWorker(); await h.clock.advance(0);
+  expect(h.db.getSource(SOURCE_ID)).toHaveLength(0);
+});
+
+test("forget does not claim success while the helper is unavailable", async () => {
+  const h = make(undefined, { hostMode: "missing" }); await h.start();
+  expect(await h.send({ type: "forget", scope: "source", id: SOURCE_ID })).toMatchObject({ ok: false });
+  expect(h.storage.pendingRecords).toHaveLength(2);
+});

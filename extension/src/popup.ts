@@ -123,7 +123,12 @@ async function forget(scope: "source" | "connection"): Promise<void> {
   if (!id) return;
   const label = scope === "source" ? "this page" : "Slack";
   if (!confirm(`Forget saved records for ${label}? This cannot be undone.`)) return;
-  chrome.runtime.sendMessage({ type: "forget", scope, id });
+  const response = await chrome.runtime.sendMessage({ type: "forget", scope, id });
+  if (!response?.ok) {
+    const error = document.querySelector<HTMLElement>("#pageError");
+    if (error) { error.hidden = false; error.textContent = response?.message ?? "Could not forget saved records. Try again."; }
+    return;
+  }
   if (scope === "source") {
     await chrome.storage.local.set({
       lastPage: {
