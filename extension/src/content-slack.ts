@@ -79,7 +79,7 @@ function publish(page: PageSnapshot): void {
   chrome.runtime.sendMessage({ type: "page", page });
 }
 
-async function capture(extracted: SlackExtract): Promise<void> {
+async function capture(extracted: SlackExtract): Promise<boolean> {
   const applied = applyVisible(known, extracted.messages);
   const records = [
     ...applied.upserts.map((draft) => toRecord(draft)),
@@ -88,13 +88,14 @@ async function capture(extracted: SlackExtract): Promise<void> {
   if (records.length > 0) {
     try {
       const response = await chrome.runtime.sendMessage({ type: "records", records });
-      if (!response?.ok) return;
+      if (!response?.ok) return false;
     } catch {
-      return; // Keep the previous known list so the next tick retries delivery.
+      return false; // Keep the previous known list so the next tick retries delivery.
     }
     console.log(`captured ${records.length} ids=${records.map((record) => record.id).join(",")}`);
   }
   known = applied.known;
+  return true;
 }
 
 function scrollContainer(): HTMLElement | null {
@@ -237,7 +238,11 @@ async function step(): Promise<void> {
     return;
   }
 
-  await capture(extracted);
+  if (!await capture(extracted)) {
+    releaseLock();
+    schedule(1000);
+    return;
+  }
 
   const visitBudget = manifest.pace.loadBudget;
   const hourlyBudget = manifest.pace.hourlyLoadBudget ?? 100;
@@ -370,7 +375,11 @@ async function step(): Promise<void> {
   const sameRows = before.rowIds.join("\n") === after.rowIds.join("\n");
   if (!sameRows) noProgressSteps = 0;
   else if (!document.hidden || before.scrollTop === after.scrollTop) noProgressSteps += 1;
-  await capture(afterExtract);
+  if (!await capture(afterExtract)) {
+    releaseLock();
+    schedule(1000);
+    return;
+  }
   if (noProgressSteps >= 3 && !afterExtract.reachedBeginning && !afterExtract.reachedOldest) {
     await stopForToday("content stopped loading", new Date(), afterExtract);
     return;

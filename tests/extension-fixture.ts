@@ -81,6 +81,7 @@ export class ExtensionFixture {
   registered: any[] = [];
   onScroll: (() => void) | null = null;
   onSend: ((message: any) => void) | null = null;
+  beforeStorageSet: ((values: Record<string, unknown>) => Promise<void>) | null = null;
   height = 2000;
   visibleHeight = 400;
   top = 1000;
@@ -135,7 +136,7 @@ export class ExtensionFixture {
     }
     const math = Object.create(Math);
     math.random = () => 0.5; // A 1500ms reader pause.
-    return { Date: FixtureDate, Math: math, URL, crypto,
+    return { Date: FixtureDate, Math: math, URL, crypto, TextEncoder,
       console: { log() {}, error: (...args: unknown[]) => this.errors.push(args) } };
   }
 
@@ -150,6 +151,7 @@ export class ExtensionFixture {
   }
 
   async setStorage(values: Record<string, unknown>) {
+    await this.beforeStorageSet?.(values);
     const changes: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(values)) {
       if (JSON.stringify(this.storage[key]) === JSON.stringify(value)) continue;

@@ -2,6 +2,7 @@ import { SiteScrollLock } from "../../connections/slack/pace.ts";
 import {
   chunkRecords,
   NATIVE_HOST_ID,
+  RECORD_BATCH_MAX_COUNT,
   type CaptureRecord,
   type Coverage,
   type PageSnapshot,
@@ -11,6 +12,7 @@ const slackLock = new SiteScrollLock();
 let port: chrome.runtime.Port | null = null;
 let reconnectTimer: number | null = null;
 const queue: CaptureRecord[] = [];
+const PENDING_MAX_BYTES = 8 * 1024 * 1024;
 let helperReady = false;
 let inFlight: { batchId: string; records: CaptureRecord[] } | null = null;
 // Serialise storage updates so an ack cannot overwrite a newly queued batch.
@@ -64,7 +66,14 @@ function rememberHelper(connected: boolean): void {
 
 function flush(): void {
   if (!port || !helperReady || inFlight || queue.length === 0) return;
-  const records = chunkRecords(queue)[0]!;
+  const records: CaptureRecord[] = [];
+  const ids = new Set<string>();
+  for (const record of chunkRecords(queue.slice(0, RECORD_BATCH_MAX_COUNT))[0]!) {
+    // Replaying a batch with two versions of one id would create extra revisions.
+    if (ids.has(record.id)) break;
+    ids.add(record.id);
+    records.push(record);
+  }
   inFlight = { batchId: crypto.randomUUID(), records };
   try {
     port.postMessage({ type: "records", ...inFlight });
@@ -98,11 +107,14 @@ function connectNative(): void {
     }
     void updateQueue(async () => {
       if (message.type === "ack" && inFlight && message.batchId === inFlight.batchId) {
-        queue.splice(0, inFlight.records.length);
-        await chrome.storage.local.set({ pendingRecords: queue.slice() });
+        const remaining = queue.slice(inFlight.records.length);
+        await chrome.storage.local.set({ pendingRecords: remaining });
+        queue.splice(0, queue.length, ...remaining);
         inFlight = null;
       }
       flush();
+    }).catch(() => {
+      if (port === currentPort) currentPort.disconnect();
     });
   });
   port.onDisconnect.addListener(() => {
@@ -135,8 +147,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   connectNative();
   if (message?.type === "records" && Array.isArray(message.records)) {
     updateQueue(async () => {
+      const pending = [...queue, ...(message.records as CaptureRecord[])];
+      if (new TextEncoder().encode(JSON.stringify(pending)).byteLength > PENDING_MAX_BYTES) {
+        throw new Error("pending records storage is full");
+      }
+      await chrome.storage.local.set({ pendingRecords: pending });
       queue.push(...(message.records as CaptureRecord[]));
-      await chrome.storage.local.set({ pendingRecords: queue.slice() });
       flush();
     }).then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));

@@ -86,3 +86,60 @@ test("incognito messages are rejected before queuing", async () => {
   expect(await h.send({ type: "records", records: [{}] }, { tab: { id: 2, incognito: true } })).toMatchObject({ ok: false, reason: "incognito" });
   expect(h.storage.pendingRecords).toBeUndefined();
 });
+
+test("a storage rejection leaves the durable queue unchanged and retries without duplicates", async () => {
+  const h = make(undefined, { hidden: true, hostMode: "missing" });
+  h.beforeStorageSet = async (values) => {
+    if ("pendingRecords" in values) throw new Error("synthetic storage failure");
+  };
+  await h.start(); await h.clock.advance(3000);
+  expect(h.storage.pendingRecords).toBeUndefined();
+  expect(h.scrolls).toHaveLength(0);
+  h.beforeStorageSet = null;
+  await h.clock.advance(1000);
+  expect(h.storage.pendingRecords).toHaveLength(2);
+  h.ports.at(-1).disconnect(); h.hostMode = "healthy";
+  await h.clock.advance(5000);
+  expect(h.storage.pendingRecords).toEqual([]);
+  expect(h.db.getSource(SOURCE_ID)).toHaveLength(2);
+  expect(h.sent.filter((message) => message.type === "records").flatMap((message) => message.records)).toHaveLength(2);
+});
+
+test("an ack storage failure retains its batch and reconnects automatically", async () => {
+  const h = make();
+  h.beforeStorageSet = async (values) => {
+    if (Array.isArray(values.pendingRecords) && values.pendingRecords.length === 0) throw new Error("synthetic ack storage failure");
+  };
+  await h.start();
+  expect(h.db.getSource(SOURCE_ID)).toHaveLength(2);
+  expect(h.storage.pendingRecords).toHaveLength(2);
+  h.beforeStorageSet = null;
+  await h.clock.advance(5000);
+  expect(h.storage.pendingRecords).toEqual([]);
+  expect(h.sent.filter((message) => message.type === "records")).toHaveLength(2);
+  for (const record of h.db.getSource(SOURCE_ID)) expect(h.db.revisions(record.id)).toHaveLength(1);
+});
+
+test("a queued edit and lost ack replay once per version", async () => {
+  const seed = make(); await seed.start();
+  const original = seed.db.getSource(SOURCE_ID)[0]!;
+  const edited = { ...original, text: "Synthetic offline edit" };
+  const h = make(undefined, { hostMode: "drop-ack", settings: { pendingRecords: [original, edited] } });
+  await h.startWorker(); await h.clock.advance(0);
+  expect(h.db.revisions(original.id).map((record) => record.text)).toEqual([original.text]);
+  h.hostMode = "healthy";
+  await h.startWorker(); await h.clock.advance(0);
+  expect(h.storage.pendingRecords).toEqual([]);
+  expect(h.db.revisions(original.id).map((record) => record.text)).toEqual([original.text, edited.text]);
+});
+
+test("the offline queue applies backpressure before exhausting Chrome local storage", async () => {
+  const h = make(undefined, { hostMode: "missing" }); await h.start();
+  const record = h.storage.pendingRecords[0];
+  expect(await h.send({ type: "records", records: [{ ...record, text: "x".repeat(8 * 1024 * 1024) }] })).toEqual({ ok: false });
+  expect(h.storage.pendingRecords).toHaveLength(2);
+  h.ports.at(-1).disconnect(); h.hostMode = "healthy";
+  await h.clock.advance(5000);
+  expect(h.storage.pendingRecords).toEqual([]);
+  expect(h.db.getSource(SOURCE_ID)).toHaveLength(2);
+});
