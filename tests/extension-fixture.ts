@@ -83,6 +83,7 @@ export class ExtensionFixture {
   onScroll: (() => void) | null = null;
   onSend: ((message: any) => void) | null = null;
   beforeStorageSet: ((values: Record<string, unknown>) => Promise<void>) | null = null;
+  beforeStorageGet: ((keys: string[]) => Promise<void>) | null = null;
   height = 2000;
   visibleHeight = 400;
   top = 1000;
@@ -146,6 +147,7 @@ export class ExtensionFixture {
     return { local: {
       get: async (keys: string | string[]) => {
         const names = typeof keys === "string" ? [keys] : keys;
+        await this.beforeStorageGet?.(names);
         return structuredClone(Object.fromEntries(names.filter((key) => key in this.storage).map((key) => [key, this.storage[key]])));
       },
       set: async (values: Record<string, unknown>) => this.setStorage(values),

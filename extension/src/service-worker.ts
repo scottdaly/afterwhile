@@ -16,12 +16,18 @@ const PENDING_MAX_BYTES = 8 * 1024 * 1024;
 let helperReady = false;
 let inFlight: { batchId: string; records: CaptureRecord[] } | null = null;
 // Serialise storage updates so an ack cannot overwrite a newly queued batch.
-let pendingWork = chrome.storage.local.get("pendingRecords").then((stored) => {
-  if (Array.isArray(stored.pendingRecords)) queue.push(...stored.pendingRecords);
-});
+let pendingWork = Promise.resolve();
+let queueLoaded = false;
 
 function updateQueue(work: () => Promise<void>): Promise<void> {
-  const result = pendingWork.then(work);
+  const result = pendingWork.then(async () => {
+    if (!queueLoaded) {
+      const stored = await chrome.storage.local.get("pendingRecords");
+      if (Array.isArray(stored.pendingRecords)) queue.push(...stored.pendingRecords);
+      queueLoaded = true;
+    }
+    await work();
+  });
   pendingWork = result.catch((error) => console.error(`queue ${String(error)}`));
   return result;
 }

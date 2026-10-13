@@ -3,7 +3,7 @@ import { readFileSync, rmSync } from "fs";
 import path from "path";
 import { localDay, sourceSlug } from "../shared/src/index.ts";
 import { handleHostMessage } from "../helper/src/host.ts";
-import { ExtensionFixture, SOURCE_ID } from "./extension-fixture.ts";
+import { ExtensionFixture, page, row, SOURCE_ID } from "./extension-fixture.ts";
 
 const active: ExtensionFixture[] = [];
 function make(...args: ConstructorParameters<typeof ExtensionFixture>) {
@@ -176,4 +176,16 @@ test("forget does not claim success while the helper is unavailable", async () =
   const h = make(undefined, { hostMode: "missing" }); await h.start();
   expect(await h.send({ type: "forget", scope: "source", id: SOURCE_ID })).toMatchObject({ ok: false });
   expect(h.storage.pendingRecords).toHaveLength(2);
+});
+
+test("a failed queue preload is retried before a new capture can overwrite the backlog", async () => {
+  const seed = make(); await seed.start();
+  const h = make(page(row(500)), { settings: { pendingRecords: seed.db.getSource(SOURCE_ID) } });
+  let fail = true;
+  h.beforeStorageGet = async (keys) => {
+    if (fail && keys.includes("pendingRecords")) { fail = false; throw new Error("synthetic preload failure"); }
+  };
+  await h.start(); await h.clock.advance(6000);
+  expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
+  expect(h.storage.pendingRecords).toEqual([]);
 });
