@@ -443,7 +443,10 @@ function restoreScroll(): void {
   if (userActive()) {
     restorePending = true;
     // A person's own scroll supersedes the automation's saved position.
-    if (savedScroll.container.scrollTop === savedScroll.expectedTop) return;
+    if (savedScroll.container.isConnected && savedScroll.container.scrollTop === savedScroll.expectedTop) {
+      schedule(Math.max(0, lastUserInputAt + IDLE_MS - Date.now()));
+      return;
+    }
   } else if (savedScroll.container.isConnected) {
     const { container, rowTs, offset, bottom } = savedScroll;
     const row = Array.from(container.querySelectorAll<HTMLElement>(selectors.message)).find((el) =>
@@ -457,7 +460,8 @@ function restoreScroll(): void {
   restorePending = false;
 }
 
-function onUserInput(): void {
+function onUserInput(event: Event): void {
+  if (!event.isTrusted) return;
   lastUserInputAt = Date.now();
   schedule(0);
 }

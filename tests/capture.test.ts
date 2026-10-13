@@ -242,6 +242,26 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     expect(h.db.coverage(SOURCE_ID)).toBeNull();
   });
 
+  test("disabling during input still restores the saved anchor once idle", async () => {
+    const h = make(undefined, { hidden: true });
+    await h.start(); await h.clock.advance(350);
+    h.height += 600;
+    Object.defineProperty(h.dom.document, "hidden", { value: false, writable: true });
+    h.input("mousemove");
+    await h.setStorage({ slackEnabled: false }); await h.clock.advance(0);
+    expect(h.top).toBe(800);
+    await h.clock.advance(30_000);
+    expect(h.top).toBe(1600);
+    expect(h.scrolls).toHaveLength(2);
+  });
+
+  test("script-generated input cannot reset the person's idle timer", async () => {
+    const h = make(); await h.start(); await h.clock.advance(30_350);
+    h.input("mousemove", false);
+    await h.clock.advance(1500);
+    expect(h.scrolls.map((scroll) => scroll.top)).toEqual([800, 600]);
+  });
+
   test("restoration falls back to distance from the bottom after the anchor is virtualized away", async () => {
     const h = make(undefined, { hidden: true });
     h.onScroll = () => {

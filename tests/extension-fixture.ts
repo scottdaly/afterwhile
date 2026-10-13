@@ -88,6 +88,7 @@ export class ExtensionFixture {
   private observers: Array<() => void> = [];
   private workerTimers: number[] = [];
   private contentWindow: any;
+  private inputHandlers = new Map<string, Array<(event: Event) => void>>();
   private static bundles: Promise<{ content: string; worker: string }> | null = null;
 
   constructor(html = page(row(100) + row(300)), options: { hidden?: boolean; settings?: Record<string, any>; url?: string; hostMode?: HostMode } = {}) {
@@ -218,7 +219,11 @@ export class ExtensionFixture {
   async startContent() {
     const owner = this;
     const window = this.contentWindow ??= {
-      addEventListener: this.dom.window.addEventListener.bind(this.dom.window),
+      addEventListener: (type: string, handler: (event: Event) => void) => {
+        const handlers = this.inputHandlers.get(type) ?? [];
+        handlers.push(handler); this.inputHandlers.set(type, handlers);
+        this.dom.window.addEventListener(type, handler);
+      },
       setTimeout: this.clock.setTimeout, clearTimeout: this.clock.clearTimeout,
     };
     runInNewContext((await ExtensionFixture.getBundles()).content, {
@@ -232,6 +237,7 @@ export class ExtensionFixture {
 
   async start() { await this.startWorker(); await this.startContent(); }
   mutate(work: () => void) { work(); this.configureList(); for (const callback of this.observers) callback(); }
-  input(type: string) { this.dom.window.dispatchEvent(new this.dom.window.Event(type)); }
+  // Model browser input explicitly; dispatchEvent itself produces untrusted events.
+  input(type: string, trusted = true) { for (const handler of this.inputHandlers.get(type) ?? []) handler({ isTrusted: trusted } as Event); }
   async close() { this.db.close(); rmSync(this.root, { recursive: true, force: true }); }
 }
