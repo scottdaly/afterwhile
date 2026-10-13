@@ -1,5 +1,5 @@
 /** Input that counts as the person using the tab. Scroll is not one of them. */
-export const USER_INPUT_EVENTS = ["wheel", "keydown", "mousedown", "touchstart", "pointerdown"] as const;
+export const USER_INPUT_EVENTS = ["wheel", "keydown", "mousedown", "mousemove", "touchstart", "pointerdown"] as const;
 
 export const IDLE_MS = 30_000;
 
@@ -46,6 +46,13 @@ export type PaceDecision =
   | { action: "stop"; reason: string; complete: boolean };
 
 export function decidePace(snapshot: PaceSnapshot, rng: () => number = Math.random): PaceDecision {
+  const userActive =
+    !snapshot.tabHidden &&
+    !snapshot.windowLocked &&
+    snapshot.now - snapshot.lastUserInputAt < IDLE_MS;
+  if (userActive) {
+    return { action: "wait", reason: "person is using this tab", retryMs: 1000 };
+  }
   if (snapshot.blockedUntil != null && snapshot.now < snapshot.blockedUntil) {
     return { action: "stop", reason: "paused for the rest of the day", complete: false };
   }
@@ -64,15 +71,8 @@ export function decidePace(snapshot: PaceSnapshot, rng: () => number = Math.rand
   if (snapshot.loadsThisHour >= snapshot.hourlyBudget) {
     return { action: "stop", reason: "hourly load budget reached", complete: false };
   }
-  const userActive =
-    !snapshot.tabHidden &&
-    !snapshot.windowLocked &&
-    snapshot.now - snapshot.lastUserInputAt < IDLE_MS;
-  if (snapshot.stalled && (snapshot.tabHidden || userActive)) {
+  if (snapshot.stalled && snapshot.tabHidden) {
     return { action: "wait", reason: "drawing stalled", retryMs: 2000 };
-  }
-  if (userActive) {
-    return { action: "wait", reason: "person is using this tab", retryMs: 1000 };
   }
   return { action: "scroll", pauseMs: nextPauseMs(rng), maxStepRatio: 0.5 };
 }

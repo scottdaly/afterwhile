@@ -9,7 +9,7 @@ import {
 
 const root = path.resolve(import.meta.dir, "..");
 const dist = path.join(root, "extension", "dist");
-const helperOut = path.join(root, "dist", APP_NAME);
+const helperOut = path.join(root, "dist", `${APP_NAME}${process.platform === "win32" ? ".exe" : ""}`);
 
 async function bundle(entry: string, outfile: string, format: "esm" | "iife"): Promise<void> {
   const proc = Bun.spawn(

@@ -7,6 +7,8 @@ export interface QueryEl {
   getAttribute(name: string): string | null;
   textContent: string | null;
   closest(selector: string): QueryEl | null;
+  parentElement?: QueryEl | null;
+  innerText?: string;
 }
 
 export interface QueryRoot {
@@ -32,6 +34,7 @@ export interface SlackDraft {
   author: { name: string; id: string } | null;
   text: string;
   fields: { threadTs: string | null; replyCount: number; edited: boolean };
+  paneId?: string;
 }
 
 export interface SlackExtract {
@@ -50,10 +53,7 @@ export interface ExtractOptions {
   oldestDays?: number;
 }
 
-export interface KnownMessage {
-  id: string;
-  occurredAt: string;
-  text: string;
+export interface KnownMessage extends SlackDraft {
   position: number | null;
 }
 
@@ -66,13 +66,13 @@ export function parseSlackUrl(url: string): { teamId: string; channelId: string 
   } catch {
     return null;
   }
-  if (!parsed.hostname.endsWith("slack.com")) return null;
+  if (parsed.hostname !== "app.slack.com") return null;
   const parts = parsed.pathname.split("/").filter(Boolean);
   const client = parts.indexOf("client");
   if (client < 0 || parts.length < client + 3) return null;
   const teamId = parts[client + 1] ?? "";
   const channelId = parts[client + 2] ?? "";
-  if (!/^[A-Z0-9]+$/i.test(teamId) || !/^[A-Z0-9]+$/i.test(channelId)) return null;
+  if (!/^T[A-Z0-9]+$/.test(teamId) || !/^[CDG][A-Z0-9]+$/.test(channelId)) return null;
   return { teamId, channelId };
 }
 
@@ -148,19 +148,24 @@ export function planUpdates(
   known: KnownMessage[],
   visible: SlackDraft[],
 ): { upserts: SlackDraft[]; deletedIds: string[] } {
-  const visibleIds = new Set(visible.map((message) => message.id));
-  const previous = new Map(known.map((message) => [message.id, message]));
-  const upserts = visible.filter((message) => previous.get(message.id)?.text !== message.text);
+  const key = (id: string, pane: string) => `${pane}:${id}`;
+  const visibleIds = new Set(visible.map((message) => key(message.id, paneId(message))));
+  const previous = new Map(known.map((message) => [key(message.id, message.paneId ?? "channel"), message]));
+  const upserts = visible.filter((message) => message.text && previous.get(key(message.id, paneId(message)))?.text !== message.text);
 
-  const ordered = [...known].sort((a, b) => compareKnown(a, b));
+  const ordered = [...known].sort((a, b) =>
+    (a.paneId ?? "channel").localeCompare(b.paneId ?? "channel") || compareKnown(a, b),
+  );
   const deletedIds: string[] = [];
   for (let i = 0; i < ordered.length; i++) {
     const item = ordered[i];
-    if (!item || visibleIds.has(item.id)) continue;
+    if (!item || visibleIds.has(key(item.id, item.paneId ?? "channel"))) continue;
     const prev = i > 0 ? ordered[i - 1] : undefined;
     const next = i + 1 < ordered.length ? ordered[i + 1] : undefined;
     if (!prev || !next) continue;
-    if (!visibleIds.has(prev.id) || !visibleIds.has(next.id)) continue;
+    const pane = item.paneId ?? "channel";
+    if (pane === "thread:unknown" || (prev.paneId ?? "channel") !== pane || (next.paneId ?? "channel") !== pane) continue;
+    if (!visibleIds.has(key(prev.id, pane)) || !visibleIds.has(key(next.id, pane))) continue;
     deletedIds.push(item.id);
   }
   return { upserts, deletedIds };
@@ -174,17 +179,22 @@ export function applyVisible(
   const deleted = known.filter((message) => plan.deletedIds.includes(message.id));
   const next = known.filter((message) => !plan.deletedIds.includes(message.id));
   for (const message of visible) {
+    // A timestamped row can be present before its text draws. Keep its old value.
+    if (!message.text) continue;
     const entry: KnownMessage = {
-      id: message.id,
-      occurredAt: message.occurredAt,
-      text: message.text,
+      ...message,
       position: null,
+      paneId: paneId(message),
     };
-    const index = next.findIndex((item) => item.id === message.id);
+    const index = next.findIndex((item) => item.id === message.id && (item.paneId ?? "channel") === paneId(message));
     if (index >= 0) next[index] = entry;
     else next.push(entry);
   }
   return { known: next, upserts: plan.upserts, deleted };
+}
+
+function paneId(message: SlackDraft): string {
+  return message.paneId ?? (message.kind === "thread_reply" ? `thread:${message.fields.threadTs ?? "unknown"}` : "channel");
 }
 
 function compareKnown(a: KnownMessage, b: KnownMessage): number {
@@ -258,8 +268,14 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
       node.getAttribute(selectors.timestampAttr) ??
       node.querySelector(selectors.timestamp)?.getAttribute(selectors.timestampAttr);
     if (!ts || !/^\d+\.\d+$/.test(ts)) continue;
-    const text = (node.querySelector(selectors.messageText)?.textContent ?? "").replace(/\s+/g, " ").trim();
-    if (!text) continue;
+    const blocks = sliceNodes(node.querySelectorAll(selectors.messageText));
+    const text = blocks
+      .filter((block) => !blocks.includes(block.parentElement?.closest(selectors.messageText) as QueryEl))
+      .map((block) => (block.closest(selectors.messageCode) === block
+        ? block.textContent ?? ""
+        : block.innerText ?? block.textContent ?? "").trim())
+      .filter(Boolean)
+      .join("\n\n");
     const authorEl = node.querySelector(selectors.author);
     const authorName = (authorEl?.textContent ?? "").replace(/\s+/g, " ").trim();
     const authorId = authorEl?.getAttribute(selectors.authorIdAttr)?.trim() ?? "";
@@ -281,6 +297,7 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
         replyCount: replyMatch ? Number(replyMatch[1]) : 0,
         edited: node.querySelector(selectors.edited) != null,
       },
+      paneId: pane ? `thread:${threadTs ?? "unknown"}` : "channel",
     });
   }
   return messages;

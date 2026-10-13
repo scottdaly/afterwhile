@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import path from "path";
 
-for (const project of ["shared", "helper", "extension"]) {
+for (const project of ["shared", "helper", "extension", "."]) {
   test(`${project} passes TypeScript`, async () => {
     const root = path.resolve(import.meta.dir, "..");
     const proc = Bun.spawn([process.execPath, "node_modules/typescript/bin/tsc", "-p", project], {

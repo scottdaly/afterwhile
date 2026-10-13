@@ -1,7 +1,8 @@
 {
   "messageList": "[data-qa='virtual-list']",
   "message": "[data-qa='virtual-list-item']",
-  "messageText": ".p-rich_text_section",
+  "messageText": ".p-rich_text_section, .p-rich_text_list, .p-rich_text_preformatted",
+  "messageCode": ".p-rich_text_preformatted",
   "timestamp": "[data-ts]",
   "timestampAttr": "data-ts",
   "author": "[data-qa='message_sender_name']",

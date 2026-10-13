@@ -1,14 +1,17 @@
 # Slack connection
 
-Selectors in `selectors.json` are **unverified**. They were written from the build brief's hints and checked only against synthetic HTML fixtures on Linux. They have not been compared with a live `app.slack.com` page.
+Selectors in `selectors.json` are **unverified**. They were written from the build brief's hints and checked against synthetic HTML fixtures. The hardening integration tests run on Windows. Selectors have not been compared with a live `app.slack.com` page.
 
 ## What the fixtures assume
 
 - Web client URL shape: `https://app.slack.com/client/<team id>/<channel id>`. The installable web app is treated as that same page.
 - Message list: `[data-qa='virtual-list']` of `[data-qa='virtual-list-item']`.
+- The scroll container must be the list or a descendant; never an ancestor outside it. Channel scrolling excludes the thread pane.
+- Message text includes all rich text sections, lists and preformatted blocks. Paragraph breaks and code whitespace are retained; nested sections are not read twice.
 - Stable id: `slack:<team>:<channel>:<data-ts>`. `data-ts` looks like `1791822000.000100`. The record time is that value as Unix seconds, converted to UTC.
 - Author: `[data-qa='message_sender_name']` plus `data-user-id`.
 - Thread replies render in `[data-qa='threads_flexpane']` with `data-thread-ts` on the pane. `fields.threadTs` links a reply to its parent. Threads are captured only while that pane is open.
+- Deletion neighbours are tracked separately for the channel and each thread. Closing a pane provides no deletion evidence. A timestamped row with undrawn text is still visible and retains its previous text.
 - Channel history is virtualized. Scrolling **up** (`scrollTop` decreases) is treated as the way older messages load. That direction is an assumption.
 - A history **load** is a scroll step after which new older message ids appear. Reveal paints that do not add older ids do not spend budget.
 - Load budget defaults: 20 loads per channel visit, 100 per hour. Both come from `connection.json`.
@@ -22,9 +25,11 @@ Selectors in `selectors.json` are **unverified**. They were written from the bui
 
 - Visible messages are read immediately. Backfill scrolling waits until the tab is hidden, the OS session is locked, or 30 seconds have passed without wheel, keyboard, mouse, or touch input in that tab. Scroll events are not treated as user input.
 - Steps move at most half the visible height. Pauses vary from about 0.5s to 2.5s, with an occasional longer pause.
+- Mutation-driven captures do not advance the next scroll deadline. Internal storage updates do not wake the reader.
 - After each step the drawn message ids must change. A background tab whose rows do not draw is stalled and resumed only once it is visible and idle.
 - One scroll job per site at a time, coordinated by the service worker.
-- Scroll position is restored when backfill stops.
+- Restore uses a row timestamp and viewport offset, with distance from the bottom as a fallback when that row is virtualized away. Input waits request restoration once the person is idle; restoration never moves an active person's view. Their own scroll supersedes the saved position.
+- Three consecutive steps without new drawn rows stop with `content stopped loading`, including when `scrollTop` is already zero and the beginning selector misses. Hidden tabs that move without redrawing wait for visibility and idle instead.
 - Pushback pauses Slack until the next local midnight. Already saved messages stay saved. The popup shows the reason.
 - The script never clicks, navigates, fetches, or synthesizes pointer or keyboard input. It sets `scrollTop` on the list container.
 

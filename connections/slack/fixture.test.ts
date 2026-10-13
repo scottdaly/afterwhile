@@ -84,17 +84,13 @@ describe("slack fixtures", () => {
     const withJordan = extractSlack(doc("channel.html"), { url: URL });
     const known: KnownMessage[] = [
       ...older.messages.map((message) => ({
-        id: message.id,
-        occurredAt: message.occurredAt,
-        text: message.text,
+        ...message,
         position: null,
       })),
       ...withJordan.messages
         .filter((message) => message.author?.id === "U03ABC")
         .map((message) => ({
-          id: message.id,
-          occurredAt: message.occurredAt,
-          text: message.text,
+          ...message,
           position: null,
         })),
     ];
@@ -227,5 +223,9 @@ describe("pacing", () => {
   test("parse rejects a non-client url", () => {
     expect(parseSlackUrl("https://example.com/client/T/C")).toBeNull();
     expect(parseSlackUrl(URL)?.channelId).toBe("C01ABCD2EFG");
+    for (const route of ["unreads", "threads", "ctest", "Ctest"]) {
+      expect(parseSlackUrl(`https://app.slack.com/client/TTEST/${route}`)).toBeNull();
+    }
+    expect(parseSlackUrl("https://evilslack.com/client/TTEST/CTEST")).toBeNull();
   });
 });
