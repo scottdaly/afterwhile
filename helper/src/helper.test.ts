@@ -354,8 +354,8 @@ describe("mcp client", () => {
         query: "focus states",
         connection: "slack",
         sourceId: record().source.id,
-        since: "2026-10-12T00:00:00.000Z",
-        until: "2026-10-12T23:59:59.000Z",
+        since: "2026-10-12T18:00:00+02:00",
+        until: "2026-10-12T10:00:00-07:00",
       },
     });
     const searchText = textOf(search);
@@ -373,13 +373,15 @@ describe("mcp client", () => {
     expect(textOf(yesterday)).toContain("Yesterday");
     expect(textOf(yesterday)).toContain("https://app.slack.com/client/T024BE7LD/C01ABCD2EFG");
 
-    const recent = await client.callTool({ name: "recent", arguments: { connection: "slack", checkpoint: true } });
+    const recent = await client.callTool({ name: "recent", arguments: { connection: "slack", checkpoint: true, limit: 1 } });
     expect(textOf(recent)).toContain("Alex Kim");
     const recentAgain = await client.callTool({
       name: "recent",
-      arguments: { connection: "slack", checkpoint: true },
+      arguments: { connection: "slack", checkpoint: true, limit: 1 },
     });
-    expect(textOf(recentAgain)).toBe("No matching records.");
+    expect(textOf(recentAgain)).toContain("Sam Patel");
+    const afterBothPages = await client.callTool({ name: "recent", arguments: { connection: "slack", checkpoint: true } });
+    expect(textOf(afterBothPages)).toBe("No matching records.");
 
     const coverage = await client.callTool({
       name: "coverage",

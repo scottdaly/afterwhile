@@ -27,7 +27,7 @@ bun test
 bun run build
 ```
 
-`bun run build` writes `extension/dist` and a compiled `dist/afterwhile` for this machine.
+`bun run build` writes `extension/dist` and a compiled `dist/afterwhile` (`dist/afterwhile.exe` on Windows) for this machine.
 
 Run from source without compiling:
 
@@ -36,7 +36,7 @@ bun run helper/src/index.ts install
 bun run helper/src/index.ts mcp
 ```
 
-Chrome starts `afterwhile host` itself after install. `host` and `mcp` keep protocol bytes on stdout and write logs to stderr and the data directory.
+Chrome starts the registered executable with its extension origin and, on Windows, a parent-window argument. The executable enters `host` mode for that invocation. `host` and `mcp` keep protocol bytes on stdout and write logs to stderr and the data directory.
 
 ## Where files go
 
@@ -75,4 +75,6 @@ The extension does not run in Incognito. It does not request every site at insta
 
 ## Tests
 
-`bun test` uses synthetic Slack HTML. It does not talk to Slack. It covers extraction, a changed-markup failure, edits and deletes, pacing, pushback, dedupe, Markdown, native messaging, install paths for macOS and Windows, and an MCP client from the official TypeScript SDK.
+`bun test` type-checks shared, helper, extension and test code, then exercises synthetic Slack HTML, the real content script and service worker with fake timers, helper ingest, SQLite/Markdown, missing-host and crash replay, and the official MCP SDK client. It also compiles and launches the helper with Chrome's native-host arguments and framed stdio. Tests never contact Slack or write the real browser registry; helper paths and logs use temporary directories.
+
+Checkpoint reads page in database insertion order and advance only to the last returned row. Browser capture timestamps do not control this cursor. Existing databases migrate automatically; legacy time checkpoints replay once to avoid skipping records. Ordinary `recent` reads and search still return newest message times first.

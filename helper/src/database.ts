@@ -50,7 +50,7 @@ export class RecordDatabase {
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     this.assertFts5();
-    this.migrate();
+    this.db.transaction(() => this.migrate()).immediate();
   }
 
   static openDefault(): RecordDatabase {
@@ -63,8 +63,9 @@ export class RecordDatabase {
   }
 
   private migrate(): void {
-    this.db.run(`
+    const recordSchema = `
       CREATE TABLE IF NOT EXISTS records (
+        ingest_seq INTEGER PRIMARY KEY AUTOINCREMENT,
         record_id TEXT NOT NULL,
         revision INTEGER NOT NULL,
         connection TEXT NOT NULL,
@@ -83,9 +84,19 @@ export class RecordDatabase {
         text TEXT NOT NULL,
         fields TEXT NOT NULL,
         deleted INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (record_id, revision)
+        UNIQUE (record_id, revision)
       )
-    `);
+    `;
+    this.db.run(recordSchema);
+    const columns = this.db.prepare("PRAGMA table_info(records)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "ingest_seq")) {
+      this.db.transaction(() => {
+        this.db.run("ALTER TABLE records RENAME TO records_before_cursor");
+        this.db.run(recordSchema);
+        this.db.run("INSERT INTO records SELECT NULL, * FROM records_before_cursor ORDER BY rowid");
+        this.db.run("DROP TABLE records_before_cursor");
+      }).immediate();
+    }
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_records_source ON records(source_id, occurred_at)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_records_connection ON records(connection, occurred_at)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_records_captured_day ON records(captured_day)`);
@@ -112,10 +123,16 @@ export class RecordDatabase {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS checkpoints (
         client TEXT PRIMARY KEY,
+        cursor_seq INTEGER NOT NULL DEFAULT 0,
         cursor_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     `);
+    const checkpointColumns = this.db.prepare("PRAGMA table_info(checkpoints)").all() as Array<{ name: string }>;
+    if (!checkpointColumns.some((column) => column.name === "cursor_seq")) {
+      // Legacy time cursors cannot be mapped reliably to insert order. Replay once.
+      this.db.run("ALTER TABLE checkpoints ADD COLUMN cursor_seq INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   busyTimeoutMs(): number {
@@ -248,11 +265,11 @@ export class RecordDatabase {
       params.push(options.sourceId);
     }
     if (options.since) {
-      where.push("r.occurred_at >= ?");
+      where.push("julianday(r.occurred_at) >= julianday(?)");
       params.push(options.since);
     }
     if (options.until) {
-      where.push("r.occurred_at <= ?");
+      where.push("julianday(r.occurred_at) <= julianday(?)");
       params.push(options.until);
     }
     params.push(limit);
@@ -261,7 +278,7 @@ export class RecordDatabase {
         `SELECT r.* FROM records_fts
          JOIN records r ON r.record_id = records_fts.record_id
          WHERE ${where.join(" AND ")}
-         ORDER BY r.occurred_at DESC
+         ORDER BY julianday(r.occurred_at) DESC
          LIMIT ?`,
       )
       .all(...params) as Row[];
@@ -269,14 +286,18 @@ export class RecordDatabase {
   }
 
   recent(options: RecentOptions = {}): StoredRecord[] {
+    const read = () => this.readRecent(options);
+    return options.checkpoint && options.client ? this.db.transaction(read).immediate() : read();
+  }
+
+  private readRecent(options: RecentOptions): StoredRecord[] {
     const limit = clampLimit(options.limit, 50);
-    let cursor: string | null = null;
-    const until = new Date().toISOString();
+    let cursor = 0;
     if (options.checkpoint && options.client) {
-      const row = this.db.prepare(`SELECT cursor_at FROM checkpoints WHERE client = ?`).get(options.client) as
-        | { cursor_at: string }
+      const row = this.db.prepare(`SELECT cursor_seq FROM checkpoints WHERE client = ?`).get(options.client) as
+        | { cursor_seq: number }
         | undefined;
-      cursor = row?.cursor_at ?? null;
+      cursor = row?.cursor_seq ?? 0;
     }
     const where = ["r.deleted = 0", "r.revision = (SELECT MAX(revision) FROM records WHERE record_id = r.record_id)"];
     const params: Array<string | number> = [];
@@ -289,28 +310,25 @@ export class RecordDatabase {
       params.push(options.connection);
     }
     if (options.since) {
-      where.push("r.occurred_at >= ?");
+      where.push("julianday(r.occurred_at) >= julianday(?)");
       params.push(options.since);
     }
     if (options.checkpoint && options.client) {
-      if (cursor) {
-        where.push("r.captured_at > ?");
-        params.push(cursor);
-      }
-      where.push("r.captured_at <= ?");
-      params.push(until);
+      where.push("r.ingest_seq > ?");
+      params.push(cursor);
     }
     params.push(limit);
     const rows = this.db
-      .prepare(`SELECT r.* FROM records r WHERE ${where.join(" AND ")} ORDER BY r.occurred_at DESC LIMIT ?`)
+      .prepare(`SELECT r.* FROM records r WHERE ${where.join(" AND ")} ORDER BY ${options.checkpoint && options.client ? "r.ingest_seq ASC" : "julianday(r.occurred_at) DESC"} LIMIT ?`)
       .all(...params) as Row[];
-    if (options.checkpoint && options.client) {
+    if (options.checkpoint && options.client && rows.length > 0) {
+      const now = new Date().toISOString();
       this.db
         .prepare(
-          `INSERT INTO checkpoints (client, cursor_at, updated_at) VALUES (?, ?, ?)
-           ON CONFLICT(client) DO UPDATE SET cursor_at = excluded.cursor_at, updated_at = excluded.updated_at`,
+          `INSERT INTO checkpoints (client, cursor_seq, cursor_at, updated_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(client) DO UPDATE SET cursor_seq = excluded.cursor_seq, cursor_at = excluded.cursor_at, updated_at = excluded.updated_at`,
         )
-        .run(options.client, until, until);
+        .run(options.client, rows[rows.length - 1]!.ingest_seq, now, now);
     }
     return rows.map(rowToRecord);
   }
@@ -334,15 +352,15 @@ export class RecordDatabase {
       params.push(options.toPosition);
     }
     if (options.since) {
-      where.push("occurred_at >= ?");
+      where.push("julianday(occurred_at) >= julianday(?)");
       params.push(options.since);
     }
     if (options.until) {
-      where.push("occurred_at <= ?");
+      where.push("julianday(occurred_at) <= julianday(?)");
       params.push(options.until);
     }
     const rows = this.db
-      .prepare(`SELECT * FROM records WHERE ${where.join(" AND ")} ORDER BY COALESCE(position, 0), occurred_at ASC`)
+      .prepare(`SELECT * FROM records WHERE ${where.join(" AND ")} ORDER BY COALESCE(position, 0), julianday(occurred_at) ASC`)
       .all(...params) as Row[];
     return rows.map(rowToRecord);
   }
@@ -513,6 +531,7 @@ export class RecordDatabase {
 }
 
 interface Row {
+  ingest_seq: number;
   record_id: string;
   revision: number;
   connection: string;
