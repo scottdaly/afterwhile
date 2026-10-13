@@ -11,6 +11,8 @@ Selectors in `selectors.json` are **unverified**. They were written from the bui
 - Stable id: `slack:<team>:<channel>:<data-ts>`. `data-ts` looks like `1791822000.000100`. The record time is that value as Unix seconds, converted to UTC.
 - Author: `[data-qa='message_sender_name']` plus `data-user-id`.
 - Thread replies render in `[data-qa='threads_flexpane']` with `data-thread-ts` on the pane. `fields.threadTs` links a reply to its parent. Threads are captured only while that pane is open.
+- Extraction reads the channel list and only threads whose parent is rendered in that list. Other previews and unattributed threads are skipped: an open thread can belong to another, possibly private, channel. Verifying independent thread provenance remains necessary before capturing threads with an offscreen parent.
+- A channel without a drawn privacy header is treated as private. Header selectors, including the lock and DM indicators, still require live validation.
 - Deletion neighbours are tracked separately for the channel and each thread. Closing a pane provides no deletion evidence. A timestamped row with undrawn text is still visible and retains its previous text.
 - Channel history is virtualized. Scrolling **up** (`scrollTop` decreases) is treated as the way older messages load. That direction is an assumption.
 - A history **load** is a scroll step after which new older message ids appear. Reveal paints that do not add older ids do not spend budget.

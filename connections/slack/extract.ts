@@ -116,8 +116,14 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   }
 
   const channel = readChannel(document, ids, options.url);
-  const list = document.querySelector(selectors.messageList);
-  const messages = list ? readMessages(document, channel) : [];
+  const list = sliceNodes(document.querySelectorAll(selectors.messageList)).find((node) => !node.closest(selectors.threadPane));
+  const messages = list ? readMessages(list, channel) : [];
+  const channelIds = new Set(messages.map((message) => message.id));
+  for (const pane of sliceNodes(document.querySelectorAll(selectors.threadPane))) {
+    const parent = pane.getAttribute(selectors.threadTsAttr);
+    // A thread can remain open from another channel; its own source is unverified.
+    if (parent && channelIds.has(`${channel.sourceId}:${parent}`)) messages.push(...readMessages(pane, channel));
+  }
   const listText = (list?.textContent ?? "").replace(/\s+/g, " ").trim();
   const hasTimestamp = list?.querySelector(selectors.timestamp) != null;
   const beginning = reachedBeginning(document);
@@ -128,6 +134,7 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   const cutoff = now.getTime() - oldestDays * 24 * 60 * 60 * 1000;
   let oldest = Number.POSITIVE_INFINITY;
   for (const message of messages) {
+    if (message.kind !== "message") continue;
     const time = Date.parse(message.occurredAt);
     if (time < oldest) oldest = time;
   }
@@ -150,6 +157,7 @@ export function planUpdates(
 ): { upserts: SlackDraft[]; deletedIds: string[] } {
   const key = (id: string, pane: string) => `${pane}:${id}`;
   const visibleIds = new Set(visible.map((message) => key(message.id, paneId(message))));
+  const visibleRecordIds = new Set(visible.map((message) => message.id));
   const previous = new Map(known.map((message) => [key(message.id, message.paneId ?? "channel"), message]));
   const upserts = visible.filter((message) => message.text && previous.get(key(message.id, paneId(message)))?.text !== message.text);
 
@@ -159,7 +167,7 @@ export function planUpdates(
   const deletedIds: string[] = [];
   for (let i = 0; i < ordered.length; i++) {
     const item = ordered[i];
-    if (!item || visibleIds.has(key(item.id, item.paneId ?? "channel"))) continue;
+    if (!item || visibleRecordIds.has(item.id)) continue;
     const prev = i > 0 ? ordered[i - 1] : undefined;
     const next = i + 1 < ordered.length ? ordered[i + 1] : undefined;
     if (!prev || !next) continue;
@@ -218,7 +226,7 @@ function detectPushback(document: QueryRoot): string | null {
 }
 
 function reachedBeginning(document: QueryRoot): boolean {
-  const banner = document.querySelector(selectors.beginning);
+  const banner = sliceNodes(document.querySelectorAll(selectors.beginning)).find((node) => !node.closest(selectors.threadPane));
   const text = (banner?.textContent ?? "").toLowerCase();
   return text.includes("very beginning") || text.includes("this is the start");
 }
@@ -228,18 +236,19 @@ function readChannel(
   ids: { teamId: string; channelId: string },
   url: string,
 ): SlackChannel {
-  const dm = document.querySelector(selectors.dmIndicator) != null || ids.channelId.startsWith("D");
-  const lock = document.querySelector(selectors.privateChannelLock) != null;
+  const header = document.querySelector(selectors.channelHeader);
+  const dm = header?.querySelector(selectors.dmIndicator) != null || ids.channelId.startsWith("D");
+  const lock = header?.querySelector(selectors.privateChannelLock) != null;
   const publicId = ids.channelId.startsWith("C");
   let kind: SlackChannel["kind"];
   if (dm) kind = "dm";
-  else if (lock || !publicId) kind = "private";
+  else if (lock || !publicId || !header?.querySelector(selectors.channelName)?.textContent?.trim()) kind = "private";
   else kind = "public";
 
   const nameEl =
-    document.querySelector(kind === "dm" ? selectors.dmIndicator : selectors.channelName) ??
-    document.querySelector(selectors.channelName) ??
-    document.querySelector(selectors.dmIndicator);
+    header?.querySelector(kind === "dm" ? selectors.dmIndicator : selectors.channelName) ??
+    header?.querySelector(selectors.channelName) ??
+    header?.querySelector(selectors.dmIndicator);
   const title = (nameEl?.textContent ?? "").replace(/\s+/g, " ").trim() || ids.channelId;
   let page = url;
   try {

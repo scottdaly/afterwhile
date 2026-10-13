@@ -83,6 +83,34 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     expect(h.db.revisions(middle.id).map((record) => record.deleted)).toEqual([false, true]);
   });
 
+  test("unrelated lists and unattributed threads cannot bypass the current channel policy", async () => {
+    const thread = `<div data-qa="threads_flexpane" data-thread-ts="1791822999.000100"><div data-qa="virtual-list">${row(250, "Synthetic private reply")}</div></div>`;
+    const h = make(page(row(100) + row(300), thread) + row(900, "Synthetic unrelated preview"));
+    await h.start();
+    expect(h.db.getSource(SOURCE_ID).map((record) => record.text)).toEqual(["Synthetic message 100", "Synthetic message 300"]);
+  });
+
+  test("a loading channel without its privacy header is private until classified", async () => {
+    const h = make(page(row(100)).replace(/<div data-qa="channel_header">.*?<\/div>/, ""));
+    await h.start();
+    expect(h.db.getSource(SOURCE_ID)).toHaveLength(0);
+    expect(h.storage.lastPage.skipped).toBe("Private channels are off");
+    h.mutate(() => { h.dom.document.body.insertAdjacentHTML("afterbegin", '<div data-qa="channel_header"><span data-qa="channel-name">#synthetic</span></div>'); });
+    await h.clock.advance(200);
+    expect(h.db.getSource(SOURCE_ID)).toHaveLength(1);
+  });
+
+  test("a reply still visible in its thread cannot be deleted when its channel copy disappears", async () => {
+    const thread = `<div data-qa="threads_flexpane" data-thread-ts="1791822100.000100"><div data-qa="virtual-list">${row(200)}</div></div>`;
+    const h = make(page(row(100) + row(200) + row(300), thread));
+    await h.start();
+    const reply = h.db.getSource(SOURCE_ID)[1]!;
+    h.mutate(() => { h.list.querySelectorAll("[data-qa='virtual-list-item']")[1]!.remove(); });
+    await h.clock.advance(200);
+    expect(h.db.revisions(reply.id)).toHaveLength(1);
+    expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
+  });
+
   test("rich text captures all paragraphs, lists and code", async () => {
     const rich = row(100, "First paragraph").replace("</div></div>", `</div>
       <div class="p-rich_text_section">Second paragraph</div>
