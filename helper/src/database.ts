@@ -88,7 +88,7 @@ export class RecordDatabase {
       )
     `;
     this.db.run(recordSchema);
-    const columns = this.db.prepare("PRAGMA table_info(records)").all() as Array<{ name: string }>;
+    const columns = this.db.query("PRAGMA table_info(records)").all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "ingest_seq")) {
       this.db.transaction(() => {
         this.db.run("ALTER TABLE records RENAME TO records_before_cursor");
@@ -128,7 +128,7 @@ export class RecordDatabase {
         updated_at TEXT NOT NULL
       )
     `);
-    const checkpointColumns = this.db.prepare("PRAGMA table_info(checkpoints)").all() as Array<{ name: string }>;
+    const checkpointColumns = this.db.query("PRAGMA table_info(checkpoints)").all() as Array<{ name: string }>;
     if (!checkpointColumns.some((column) => column.name === "cursor_seq")) {
       // Legacy time cursors cannot be mapped reliably to insert order. Replay once.
       this.db.run("ALTER TABLE checkpoints ADD COLUMN cursor_seq INTEGER NOT NULL DEFAULT 0");
@@ -136,7 +136,7 @@ export class RecordDatabase {
   }
 
   busyTimeoutMs(): number {
-    const row = this.db.prepare("PRAGMA busy_timeout").get() as { timeout?: number; busy_timeout?: number };
+    const row = this.db.query("PRAGMA busy_timeout").get() as { timeout?: number; busy_timeout?: number };
     return Number(row.timeout ?? row.busy_timeout ?? 0);
   }
 
@@ -170,7 +170,7 @@ export class RecordDatabase {
     }
     if (latest && latest.text === record.text && Boolean(latest.deleted) === record.deleted) {
       this.db
-        .prepare(`UPDATE records SET source_title = ?, source_url = ? WHERE record_id = ? AND revision = ?`)
+        .query(`UPDATE records SET source_title = ?, source_url = ? WHERE record_id = ? AND revision = ?`)
         .run(record.source.title, record.source.url, record.id, latest.revision);
       this.syncFts(record.id, record.deleted ? null : record);
       return "unchanged";
@@ -180,7 +180,7 @@ export class RecordDatabase {
     const occurredDay = localDay(record.occurredAt);
     const capturedDay = localDay(record.capturedAt);
     this.db
-      .prepare(
+      .query(
         `INSERT INTO records (
           record_id, revision, connection, connection_version, kind, source_id, source_title,
           source_url, position, occurred_at, captured_at, occurred_day, captured_day,
@@ -213,22 +213,22 @@ export class RecordDatabase {
   }
 
   private syncFts(recordId: string, current: CaptureRecord | null): void {
-    this.db.prepare(`DELETE FROM records_fts WHERE record_id = ?`).run(recordId);
+    this.db.query(`DELETE FROM records_fts WHERE record_id = ?`).run(recordId);
     if (!current || current.deleted) return;
     this.db
-      .prepare(`INSERT INTO records_fts (record_id, text, source_title, author_name) VALUES (?, ?, ?, ?)`)
+      .query(`INSERT INTO records_fts (record_id, text, source_title, author_name) VALUES (?, ?, ?, ?)`)
       .run(recordId, current.text, current.source.title, current.author?.name ?? "");
   }
 
   private latestRow(recordId: string): Row | undefined {
     return this.db
-      .prepare(`SELECT * FROM records WHERE record_id = ? ORDER BY revision DESC LIMIT 1`)
+      .query(`SELECT * FROM records WHERE record_id = ? ORDER BY revision DESC LIMIT 1`)
       .get(recordId) as Row | undefined;
   }
 
   updateCoverage(coverage: Coverage): void {
     this.db
-      .prepare(
+      .query(
         `INSERT INTO coverage (source_id, expected, have, gaps, complete, reason, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(source_id) DO UPDATE SET
@@ -274,7 +274,7 @@ export class RecordDatabase {
     }
     params.push(limit);
     const rows = this.db
-      .prepare(
+      .query(
         `SELECT r.* FROM records_fts
          JOIN records r ON r.record_id = records_fts.record_id
          WHERE ${where.join(" AND ")}
@@ -294,7 +294,7 @@ export class RecordDatabase {
     const limit = clampLimit(options.limit, 50);
     let cursor = 0;
     if (options.checkpoint && options.client) {
-      const row = this.db.prepare(`SELECT cursor_seq FROM checkpoints WHERE client = ?`).get(options.client) as
+      const row = this.db.query(`SELECT cursor_seq FROM checkpoints WHERE client = ?`).get(options.client) as
         | { cursor_seq: number }
         | undefined;
       cursor = row?.cursor_seq ?? 0;
@@ -319,12 +319,12 @@ export class RecordDatabase {
     }
     params.push(limit);
     const rows = this.db
-      .prepare(`SELECT r.* FROM records r WHERE ${where.join(" AND ")} ORDER BY ${options.checkpoint && options.client ? "r.ingest_seq ASC" : "julianday(r.occurred_at) DESC"} LIMIT ?`)
+      .query(`SELECT r.* FROM records r WHERE ${where.join(" AND ")} ORDER BY ${options.checkpoint && options.client ? "r.ingest_seq ASC" : "julianday(r.occurred_at) DESC"} LIMIT ?`)
       .all(...params) as Row[];
     if (options.checkpoint && options.client && rows.length > 0) {
       const now = new Date().toISOString();
       this.db
-        .prepare(
+        .query(
           `INSERT INTO checkpoints (client, cursor_seq, cursor_at, updated_at) VALUES (?, ?, ?, ?)
            ON CONFLICT(client) DO UPDATE SET cursor_seq = excluded.cursor_seq, cursor_at = excluded.cursor_at, updated_at = excluded.updated_at`,
         )
@@ -360,7 +360,7 @@ export class RecordDatabase {
       params.push(options.until);
     }
     const rows = this.db
-      .prepare(`SELECT * FROM records WHERE ${where.join(" AND ")} ORDER BY COALESCE(position, 0), julianday(occurred_at) ASC`)
+      .query(`SELECT * FROM records WHERE ${where.join(" AND ")} ORDER BY COALESCE(position, 0), julianday(occurred_at) ASC`)
       .all(...params) as Row[];
     return rows.map(rowToRecord);
   }
@@ -385,7 +385,7 @@ export class RecordDatabase {
       params.push(connection);
     }
     sql += ` GROUP BY source_id ORDER BY last_captured DESC`;
-    const rows = this.db.prepare(sql).all(...params) as Array<{
+    const rows = this.db.query(sql).all(...params) as Array<{
       source_id: string;
       source_title: string;
       source_url: string;
@@ -403,7 +403,7 @@ export class RecordDatabase {
   }
 
   coverage(sourceId: string): Coverage | null {
-    const row = this.db.prepare(`SELECT * FROM coverage WHERE source_id = ?`).get(sourceId) as
+    const row = this.db.query(`SELECT * FROM coverage WHERE source_id = ?`).get(sourceId) as
       | {
           source_id: string;
           expected: number | null;
@@ -451,14 +451,14 @@ export class RecordDatabase {
   todayCount(now = new Date()): number {
     const day = localDay(now.toISOString());
     const row = this.db
-      .prepare(`SELECT COUNT(DISTINCT record_id) AS n FROM records WHERE captured_day = ?`)
+      .query(`SELECT COUNT(DISTINCT record_id) AS n FROM records WHERE captured_day = ?`)
       .get(day) as { n: number };
     return Number(row?.n ?? 0);
   }
 
   revisions(recordId: string): StoredRecord[] {
     const rows = this.db
-      .prepare(`SELECT * FROM records WHERE record_id = ? ORDER BY revision ASC`)
+      .query(`SELECT * FROM records WHERE record_id = ? ORDER BY revision ASC`)
       .all(recordId) as Row[];
     return rows.map(rowToRecord);
   }
@@ -469,30 +469,30 @@ export class RecordDatabase {
   } {
     const rows =
       scope === "source"
-        ? (this.db.prepare(`SELECT DISTINCT source_id, connection FROM records WHERE source_id = ?`).all(id) as Array<{
+        ? (this.db.query(`SELECT DISTINCT source_id, connection FROM records WHERE source_id = ?`).all(id) as Array<{
             source_id: string;
             connection: string;
           }>)
-        : (this.db.prepare(`SELECT DISTINCT source_id, connection FROM records WHERE connection = ?`).all(id) as Array<{
+        : (this.db.query(`SELECT DISTINCT source_id, connection FROM records WHERE connection = ?`).all(id) as Array<{
             source_id: string;
             connection: string;
           }>);
     const result =
       scope === "source"
-        ? this.db.prepare(`DELETE FROM records WHERE source_id = ?`).run(id)
-        : this.db.prepare(`DELETE FROM records WHERE connection = ?`).run(id);
-    if (scope === "source") this.db.prepare(`DELETE FROM coverage WHERE source_id = ?`).run(id);
+        ? this.db.query(`DELETE FROM records WHERE source_id = ?`).run(id)
+        : this.db.query(`DELETE FROM records WHERE connection = ?`).run(id);
+    if (scope === "source") this.db.query(`DELETE FROM coverage WHERE source_id = ?`).run(id);
     else {
       const coverageIds = rows.map((row) => row.source_id);
-      for (const sourceId of coverageIds) this.db.prepare(`DELETE FROM coverage WHERE source_id = ?`).run(sourceId);
+      for (const sourceId of coverageIds) this.db.query(`DELETE FROM coverage WHERE source_id = ?`).run(sourceId);
     }
     this.db.run(`DELETE FROM records_fts`);
     const remaining = this.db
-      .prepare(
+      .query(
         `SELECT * FROM records r WHERE r.deleted = 0 AND r.revision = (SELECT MAX(revision) FROM records WHERE record_id = r.record_id)`,
       )
       .all() as Row[];
-    const insert = this.db.prepare(
+    const insert = this.db.query(
       `INSERT INTO records_fts (record_id, text, source_title, author_name) VALUES (?, ?, ?, ?)`,
     );
     for (const row of remaining) insert.run(row.record_id, row.text, row.source_title, row.author_name ?? "");
@@ -507,7 +507,7 @@ export class RecordDatabase {
     const unique = [...new Set(recordIds)];
     const placeholders = unique.map(() => "?").join(", ");
     const rows = this.db
-      .prepare(
+      .query(
         `SELECT DISTINCT connection, source_id, occurred_day FROM records WHERE record_id IN (${placeholders})`,
       )
       .all(...unique) as Array<{ connection: string; source_id: string; occurred_day: string }>;
@@ -516,7 +516,7 @@ export class RecordDatabase {
 
   dayRecords(sourceId: string, day: string): StoredRecord[] {
     const rows = this.db
-      .prepare(
+      .query(
         `SELECT * FROM records WHERE source_id = ? AND occurred_day = ?
          AND revision = (SELECT MAX(revision) FROM records r2 WHERE r2.record_id = records.record_id)
          ORDER BY occurred_at ASC`,

@@ -85,7 +85,7 @@ describe("storage", () => {
     dirs.push(dirsForTest.root);
     const db = new RecordDatabase(path.join(dirsForTest.data, "records.db"));
     expect(db.busyTimeoutMs()).toBeGreaterThanOrEqual(5000);
-    const mode = db.db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+    const mode = db.db.query("PRAGMA journal_mode").get() as { journal_mode: string };
     expect(mode.journal_mode.toLowerCase()).toBe("wal");
 
     const first = acceptRecords(db, dirsForTest.files, [record(), record()]);

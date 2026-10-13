@@ -51,7 +51,7 @@ test("insert cursor keeps increasing after forget removes every record", () => {
 test("legacy records and time checkpoints migrate without skipping history", () => {
   const db = database(); db.insertRecords([record(0), record(1)]);
   db.recent({ client: "legacy", checkpoint: true });
-  const columns = (db.db.prepare("PRAGMA table_info(records)").all() as Array<{ name: string }>).map((column) => column.name).filter((name) => name !== "ingest_seq");
+  const columns = (db.db.query("PRAGMA table_info(records)").all() as Array<{ name: string }>).map((column) => column.name).filter((name) => name !== "ingest_seq");
   db.db.run(`CREATE TABLE legacy_records AS SELECT ${columns.join(", ")} FROM records ORDER BY ingest_seq`);
   db.db.run("DROP TABLE records");
   db.db.run("ALTER TABLE legacy_records RENAME TO records");
