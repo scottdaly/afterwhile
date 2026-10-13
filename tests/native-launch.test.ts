@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
@@ -7,17 +7,21 @@ import { RecordDatabase } from "../helper/src/database.ts";
 import { encodeNative, NativeDecoder } from "../helper/src/native-frame.ts";
 import { envName } from "../helper/src/paths.ts";
 
+const buildDirs: string[] = [];
+afterEach(() => { for (const dir of buildDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 test("compiled helper accepts Chrome's native-host launch arguments and ingests a framed batch", async () => {
   const root = path.resolve(import.meta.dir, "..");
-  const executable = path.join(root, "dist", `${APP_NAME}${process.platform === "win32" ? ".exe" : ""}`);
-  const build = Bun.spawn([process.execPath, "build", "helper/src/index.ts", "--compile", "--outfile", executable], {
-    cwd: root, stdout: "pipe", stderr: "pipe",
+  const temp = mkdtempSync(path.join(tmpdir(), `${APP_NAME}-chrome-launch-`));
+  buildDirs.push(temp);
+  const executable = path.join(temp, `${APP_NAME}${process.platform === "win32" ? ".exe" : ""}`);
+  const build = Bun.spawn([process.execPath, "build", path.join(root, "helper/src/index.ts"), "--compile", "--outfile", executable], {
+    cwd: temp, stdout: "pipe", stderr: "pipe",
   });
   const [buildOutput, buildErrors, buildCode] = await Promise.all([
     new Response(build.stdout).text(), new Response(build.stderr).text(), build.exited,
   ]);
   expect({ code: buildCode, diagnostics: buildCode ? buildOutput + buildErrors : "" }).toEqual({ code: 0, diagnostics: "" });
-  const temp = mkdtempSync(path.join(tmpdir(), `${APP_NAME}-chrome-launch-`));
   const record: CaptureRecord = {
     id: "slack:TTEST:CTEST:1791822000.000100", connection: "slack", connectionVersion: "0.1.0",
     kind: "message", source: { id: "slack:TTEST:CTEST", title: "#synthetic", url: "https://app.slack.com/client/TTEST/CTEST" },
@@ -46,6 +50,5 @@ test("compiled helper accepts Chrome's native-host launch arguments and ingests 
   } finally {
     proc.kill();
     await proc.exited;
-    rmSync(temp, { recursive: true, force: true });
   }
 }, 30_000);
