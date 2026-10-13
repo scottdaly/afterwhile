@@ -98,6 +98,12 @@ The companion should get complete captures without anyone scrolling for it, whil
 - **Reveal scrolling:** the content is already loaded and the page only draws what's on screen (a Teams transcript draws about 44 lines at a time). Scrolling makes few or no requests. Allowed within the pacing below.
 - **Load scrolling:** scrolling makes the site fetch more (scrolling up in Slack loads older messages). Every load counts against a budget.
 
+**Capture and backfill controls**
+- Visible capture and automatic backfill are separate. Backfill starts off; enabling it applies to opened channels permitted by the capture settings.
+- Choose the past 7 days, past 30 days, or all available history. Reaching a lookback boundary is not evidence that the whole source is fully saved.
+- Persist each channel's oldest saved point, range boundary and current batch cooldown. Rest for one minute after 20 history loads, then continue when idle and within the hourly allowance. Resume when the hourly allowance resets. Closed channels are not opened automatically.
+- A stored timestamp is progress, not a browser cursor: after a reload, retrace drawn history at reader pace to reach it. Retracing older rows also spends the load allowance. Do not navigate or request hidden history to jump there.
+
 **When it scrolls**
 - Only in tabs that are already open, only inside the connection's own container (the transcript panel, the message list), and only to finish the current source.
 - Never while the person is using that tab. If they've used the wheel, keyboard, mouse or touch there in the last 30 seconds, it waits. Count only real input events: the companion's own scrolling fires `scroll` events too, so `scroll` can't be the signal. A tab the person isn't looking at (another tab is active, or the window is minimized) can go straight away; that covers tabs an AI agent opened, without needing to know who opened them. When done, it puts the scroll position back.
@@ -106,7 +112,7 @@ The companion should get complete captures without anyone scrolling for it, whil
 **Pacing like a patient reader**
 - Steps of at most half the visible height, so every row is seen at least once (bigger steps skip rows in virtualized lists).
 - Pauses that vary the way a reader's do, roughly 0.5 to 2.5 seconds, with an occasional longer one.
-- Load scrolling has a budget per site. The extension can't see the network, so a "load" is a scroll step after which new older items appeared in the page. The budget is set in each connection's `connection.json`, with conservative defaults (for Slack, something like 20 history loads per channel visit and 100 an hour overall). Past the budget, coverage stays partial and the popup says so.
+- Load scrolling has a budget per site. The extension can't see the network, so a "load" is a scroll step after which new older items appeared in the page. The budget is set in each connection's `connection.json`, with conservative defaults (for Slack, 20 history loads per batch and 100 an hour overall). At a budget boundary, coverage stays partial and the popup shows when reading can resume.
 - One scrolling job per site at a time, across all tabs.
 - **Stop when the site pushes back**: a CAPTCHA, a "slow down" or "something went wrong" message, a sign-in prompt, or content that stops loading. Pause that site for the rest of the day, keep what was captured, and show why in the popup.
 

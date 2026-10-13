@@ -1,5 +1,5 @@
 {
-  "messageList": "[data-qa='virtual-list']",
+  "messageList": "[data-qa='virtual-list'], .p-message_pane .c-virtual_list",
   "message": "[data-qa='virtual-list-item']",
   "messageText": ".p-rich_text_section, .p-rich_text_list, .p-rich_text_preformatted",
   "messageCode": ".p-rich_text_preformatted",
@@ -9,15 +9,19 @@
   "authorIdAttr": "data-user-id",
   "threadReplies": "[data-qa='thread_replies']",
   "edited": "[data-qa='message_edited']",
-  "channelName": "[data-qa='channel-name']",
-  "channelHeader": "[data-qa='channel_header']",
+  "channelName": "[data-qa='channel-name'], [data-qa='channel_name'] .p-view_header__channel_title",
+  "channelHeader": "[data-qa='channel_header'], .p-view_header",
   "dmIndicator": "[data-qa='dm_channel_name']",
   "privateChannelLock": "[data-qa='channel-lock-icon']",
+  "publicChannelIcon": ".p-view_header__channel_title_icon[data-inline-channel-type-icon='channel-filled'] svg[data-qa='channel-filled']",
   "threadPane": "[data-qa='threads_flexpane']",
   "threadTsAttr": "data-thread-ts",
+  "threadParent": "[data-thread-ts]",
+  "threadRoot": ".c-message_kit__thread_message--root[data-msg-channel-id]",
+  "channelIdAttr": "data-msg-channel-id",
   "beginning": "[data-qa='beginning-banner']",
   "captcha": "[data-qa='captcha']",
   "errorBanner": "[data-qa='banner_error']",
   "login": "[data-qa='signin_form']",
-  "shell": "[data-qa='client_loading'], [data-qa='virtual-list'], [data-qa='channel_header'], [data-qa='signin_form']"
+  "shell": "[data-qa='client_loading'], [data-qa='virtual-list'], [data-qa='channel_header'], [data-qa='signin_form'], .p-message_pane .c-virtual_list"
 }

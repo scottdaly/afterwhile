@@ -1,12 +1,15 @@
+import { backfillRange, rangeDays, rangeLabel, readProgress, progressText, type BackfillProgress, type BackfillRange } from "../../connections/slack/backfill.ts";
 import manifest from "../../connections/slack/connection.json";
 import { applyVisible, channelPolicy, extractSlack, type KnownMessage, type SlackDraft, type SlackExtract } from "../../connections/slack/extract.ts";
 import { decidePace, drawingStalled, IDLE_MS, scrollStepPx, USER_INPUT_EVENTS, type PaceSnapshot } from "../../connections/slack/pace.ts";
 import selectors from "../../connections/slack/selectors.json";
-import { coverageHint, endOfLocalDay, type CaptureRecord, type Coverage, type PageSnapshot } from "../../shared/src/index.ts";
+import { endOfLocalDay, type CaptureRecord, type Coverage, type PageSnapshot } from "../../shared/src/index.ts";
 
 interface Settings {
   slackEnabled: boolean;
   paused: boolean;
+  slackBackfillEnabled: boolean;
+  slackBackfillRange: BackfillRange;
   includeDms: boolean;
   includePrivate: boolean;
   slackBlockedUntil: number;
@@ -18,6 +21,8 @@ interface Settings {
 const defaults: Settings = {
   slackEnabled: false,
   paused: false,
+  slackBackfillEnabled: false,
+  slackBackfillRange: "30d",
   includeDms: false,
   includePrivate: false,
   slackBlockedUntil: 0,
@@ -29,7 +34,8 @@ const defaults: Settings = {
 let settings: Settings = { ...defaults };
 let known: KnownMessage[] = [];
 let sourceId: string | null = null;
-let loadsThisVisit = 0;
+let progress: BackfillProgress = readProgress(null, "30d", Date.now());
+let savedCount = 0;
 let stalled = false;
 let savedScroll: { container: HTMLElement; rowTs: string | null; offset: number; bottom: number; expectedTop: number } | null = null;
 let restorePending = false;
@@ -42,6 +48,43 @@ let timerAt = 0;
 let running = false;
 let rerun = false;
 let windowLocked = false;
+let stopped = false;
+let observer: MutationObserver | null = null;
+
+function contextInvalidated(error: unknown): boolean {
+  return /extension context invalidated/i.test(error instanceof Error ? error.message : String(error));
+}
+
+function stop(): void {
+  if (stopped) return;
+  stopped = true;
+  if (timer != null) window.clearTimeout(timer);
+  timer = null;
+  rerun = false;
+  observer?.disconnect();
+  observer = null;
+  for (const eventName of USER_INPUT_EVENTS) window.removeEventListener(eventName, onUserInput, true);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+  try { chrome.storage.onChanged.removeListener(onSettingsChanged); } catch { /* Context may already be gone. */ }
+  window.__localMemorySlack = false;
+  // Retiring a stale script must never move a person's current view.
+  savedScroll = null;
+}
+
+function handleError(error: unknown): void {
+  if (contextInvalidated(error)) stop();
+  else console.error("Slack capture encountered an extension error.");
+}
+
+async function sendMessage(message: unknown): Promise<any> {
+  if (stopped) return undefined;
+  try {
+    return await chrome.runtime.sendMessage(message);
+  } catch (error) {
+    if (contextInvalidated(error)) stop();
+    throw error;
+  }
+}
 
 function hourBucket(now: Date): string {
   return now.toISOString().slice(0, 13);
@@ -50,6 +93,7 @@ function hourBucket(now: Date): string {
 async function loadSettings(): Promise<void> {
   const stored = await chrome.storage.local.get(Object.keys(defaults));
   settings = { ...defaults, ...stored };
+  settings.slackBackfillRange = backfillRange(settings.slackBackfillRange);
   const bucket = hourBucket(new Date());
   if (settings.slackHourBucket !== bucket) {
     settings.slackHourBucket = bucket;
@@ -76,7 +120,7 @@ function toRecord(draft: SlackDraft, deleted = false): CaptureRecord {
 }
 
 function publish(page: PageSnapshot): void {
-  chrome.runtime.sendMessage({ type: "page", page });
+  void sendMessage({ type: "page", page }).catch(handleError);
 }
 
 async function capture(extracted: SlackExtract): Promise<boolean> {
@@ -87,7 +131,7 @@ async function capture(extracted: SlackExtract): Promise<boolean> {
   ];
   if (records.length > 0) {
     try {
-      const response = await chrome.runtime.sendMessage({ type: "records", records });
+      const response = await sendMessage({ type: "records", records });
       if (!response?.ok) return false;
     } catch {
       return false; // Keep the previous known list so the next tick retries delivery.
@@ -95,6 +139,13 @@ async function capture(extracted: SlackExtract): Promise<boolean> {
     console.log(`captured ${records.length} ids=${records.map((record) => record.id).join(",")}`);
   }
   known = applied.known;
+  const oldestAt = extracted.messages.filter((m) => m.kind === "message" && m.text)
+    .map((m) => m.occurredAt).sort()[0];
+  const response = await sendMessage({ type: "backfill-progress", sourceId: extracted.channel!.sourceId,
+    range: settings.slackBackfillRange, oldestAt });
+  if (!response?.ok) return false;
+  progress = response.progress;
+  savedCount = typeof response.count === "number" ? response.count : known.length;
   return true;
 }
 
@@ -108,6 +159,7 @@ function scrollContainer(): HTMLElement | null {
 }
 
 function schedule(delay: number): void {
+  if (stopped) return;
   const due = Date.now() + delay;
   if (timer != null && timerAt <= due) return;
   if (timer != null) window.clearTimeout(timer);
@@ -120,7 +172,7 @@ function schedule(delay: number): void {
 
 async function machineLocked(): Promise<boolean> {
   try {
-    const response = await chrome.runtime.sendMessage({ type: "idle-state" });
+    const response = await sendMessage({ type: "idle-state" });
     return response?.state === "locked";
   } catch {
     return false;
@@ -128,6 +180,7 @@ async function machineLocked(): Promise<boolean> {
 }
 
 async function tick(): Promise<void> {
+  if (stopped) return;
   if (running) {
     rerun = true;
     return;
@@ -135,6 +188,9 @@ async function tick(): Promise<void> {
   running = true;
   try {
     await step();
+  } catch (error) {
+    handleError(error);
+    if (!stopped) schedule(3000);
   } finally {
     running = false;
     if (rerun) {
@@ -152,10 +208,11 @@ async function step(): Promise<void> {
     return;
   }
   const now = new Date();
+  const rangeAtStart = settings.slackBackfillRange;
   const extracted = extractSlack(document, {
     url: location.href,
     now,
-    oldestDays: manifest.pace.oldestDays ?? 30,
+    oldestDays: rangeDays(backfillRange(settings.slackBackfillRange)),
   });
 
   if (extracted.pushback || now.getTime() < settings.slackBlockedUntil) {
@@ -198,7 +255,8 @@ async function step(): Promise<void> {
   if (extracted.channel.sourceId !== sourceId) {
     sourceId = extracted.channel.sourceId;
     known = [];
-    loadsThisVisit = 0;
+    progress = readProgress(null, backfillRange(settings.slackBackfillRange), Date.now());
+    savedCount = 0;
     stalled = false;
     savedScroll = null;
     restorePending = false;
@@ -231,8 +289,8 @@ async function step(): Promise<void> {
       sourceId: extracted.channel.sourceId,
       title: extracted.channel.title,
       url: extracted.channel.url,
-      count: known.length,
-      coverage: "Paused",
+      count: savedCount,
+      coverage: "All capture paused",
       error: null,
       skipped: null,
     });
@@ -246,57 +304,90 @@ async function step(): Promise<void> {
     return;
   }
 
+  if (!settings.slackBackfillEnabled) {
+    restoreScroll();
+    releaseLock();
+    publish({ sourceId, title: extracted.channel.title, url: extracted.channel.url, count: savedCount,
+      coverage: progressText(progress, "Saving visible messages · Automatic backfill off"), error: null, skipped: null });
+    void sendMessage({ type: "coverage", coverage: { sourceId, expected: null, have: savedCount, gaps: [],
+      complete: false, reason: "automatic backfill off", updatedAt: now.toISOString() } }).catch(handleError);
+    schedule(2000);
+    return;
+  }
+
+  if (settings.slackBackfillRange !== rangeAtStart) { schedule(0); return; }
   const visitBudget = manifest.pace.loadBudget;
   const hourlyBudget = manifest.pace.hourlyLoadBudget ?? 100;
   windowLocked = await machineLocked();
+  if (stopped) return;
   const snapshot: PaceSnapshot = {
     now: Date.now(),
     lastUserInputAt,
     tabHidden: document.hidden,
     windowLocked,
-    loadsThisVisit,
+    loadsThisVisit: progress.batchLoads,
     loadsThisHour: settings.slackHourLoads,
     visitBudget,
     hourlyBudget,
-    reachedBeginning: extracted.reachedBeginning,
-    reachedOldest: extracted.reachedOldest,
+    reachedBeginning: extracted.reachedBeginning || (progress.reachedBoundary && progress.boundaryKind === "start"),
+    reachedOldest: extracted.reachedOldest || progress.reachedBoundary,
     pushback: extracted.pushback,
     stalled,
     blockedUntil: settings.slackBlockedUntil || null,
   };
   const decision = decidePace(snapshot);
 
+  if (decision.action === "stop" && decision.complete) {
+    const response = await sendMessage({ type: "backfill-progress", sourceId, range: settings.slackBackfillRange, reachedBoundary: true, boundaryKind: decision.reason === "reached the start" ? "start" : "range" });
+    if (response?.ok) progress = response.progress;
+  }
+  const rangeComplete = decision.action === "stop" && decision.complete && decision.reason === "reached the oldest point";
   const coverage: Coverage = {
     sourceId: extracted.channel.sourceId,
     expected: null,
-    have: known.length,
+    have: savedCount,
     gaps: [],
-    complete: decision.action === "stop" && decision.complete,
-    reason: decision.action === "stop" && !decision.complete ? decision.reason : null,
+    // A history boundary proves neither contiguous coverage nor unopened thread replies.
+    complete: false,
+    reason: rangeComplete ? `selected range reached (${rangeLabel(settings.slackBackfillRange)})`
+      : decision.action === "stop" && decision.complete ? "channel start reached; unopened threads may be missing"
+      : decision.action === "stop" ? decision.reason : null,
     updatedAt: now.toISOString(),
   };
-  const coverageText =
-    decision.action === "scroll" || decision.action === "wait"
-      ? known.length > 0
-        ? "Reading this channel."
-        : "Nothing saved from this page yet."
-      : coverageHint(coverage, extracted.channel.title);
+  const nextHour = (Math.floor(Date.now() / 3_600_000) + 1) * 3_600_000;
+  const resumeAt = decision.action === "stop" && decision.reason === "hourly load budget reached" ? nextHour : progress.resumeAt;
+  const resumeTime = resumeAt ? new Date(resumeAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "soon";
+  const oldestVisible = extracted.messages.filter((m) => m.kind === "message").map((m) => m.occurredAt).sort()[0];
+  const retracing = progress.oldestAt && oldestVisible && oldestVisible > progress.oldestAt;
+  const status = decision.action === "wait"
+    ? decision.reason === "person is using this tab" ? "Backfill waiting while you use this tab" : "Waiting for Slack to draw older messages"
+    : decision.action === "scroll" ? retracing ? "Retracing saved history" : "Reading older messages"
+    : rangeComplete ? `Selected range reached · ${rangeLabel(settings.slackBackfillRange)}`
+    : decision.complete ? "Reached channel start · Open threads to save their replies"
+    : decision.reason === "load budget reached" ? `Backfill resting · Resumes at ${resumeTime}`
+    : decision.reason === "hourly load budget reached" ? `Hourly limit reached · Resumes at ${resumeTime}`
+    : decision.reason;
+  const coverageText = progressText(progress, status);
 
   publish({
     sourceId: extracted.channel.sourceId,
     title: extracted.channel.title,
     url: extracted.channel.url,
-    count: known.length,
+    count: savedCount,
     coverage: coverageText,
     error: null,
     skipped: null,
   });
 
+  // AI clients need partial coverage while capture is active, too.
+  void sendMessage({ type: "coverage", coverage }).catch(handleError);
+
   if (decision.action === "stop") {
-    chrome.runtime.sendMessage({ type: "coverage", coverage });
-    restoreScroll();
+    const budgetPause = decision.reason === "load budget reached" || decision.reason === "hourly load budget reached";
+    // Retain the frontier while idle; returning/input still requests safe restoration.
+    if (!budgetPause || restorePending) restoreScroll();
     releaseLock();
-    schedule(decision.complete ? 5000 : 60_000);
+    schedule(decision.complete ? 5000 : resumeAt ? Math.max(1000, resumeAt - Date.now()) : 60_000);
     return;
   }
 
@@ -317,13 +408,13 @@ async function step(): Promise<void> {
     return;
   }
 
-  const lock = await chrome.runtime.sendMessage({ type: "scroll-lock", op: "acquire", site: "slack" });
+  const lock = await sendMessage({ type: "scroll-lock", op: "acquire", site: "slack" });
   if (!lock?.ok) {
     schedule(1500);
     return;
   }
   await loadSettings();
-  if (settings.slackHourLoads >= hourlyBudget || settings.slackBlockedUntil > Date.now() || !settings.slackEnabled || settings.paused) {
+  if (settings.slackHourLoads >= hourlyBudget || settings.slackBlockedUntil > Date.now() || !settings.slackEnabled || settings.paused || !settings.slackBackfillEnabled || settings.slackBackfillRange !== rangeAtStart) {
     releaseLock();
     schedule(0);
     return;
@@ -354,7 +445,8 @@ async function step(): Promise<void> {
   // DOM notifications may capture promptly, but cannot shorten this reader pause.
   nextScrollAt = Date.now() + 350 + decision.pauseMs;
   await new Promise((resolve) => window.setTimeout(resolve, 350));
-  const afterExtract = extractSlack(document, { url: location.href, now: new Date(), oldestDays: manifest.pace.oldestDays ?? 30 });
+  if (stopped) return;
+  const afterExtract = extractSlack(document, { url: location.href, now: new Date(), oldestDays: rangeDays(backfillRange(settings.slackBackfillRange)) });
   if (afterExtract.pushback) {
     await stopForToday(afterExtract.pushback, new Date(), afterExtract);
     return;
@@ -371,7 +463,7 @@ async function step(): Promise<void> {
     schedule(200);
     return;
   }
-  if (!settings.slackEnabled || settings.paused || !channelPolicy(afterExtract.channel.kind, settings).capture) {
+  if (!settings.slackEnabled || settings.paused || !settings.slackBackfillEnabled || !channelPolicy(afterExtract.channel.kind, settings).capture) {
     restoreScroll();
     releaseLock();
     schedule(1000);
@@ -406,10 +498,10 @@ async function countHistoryLoad(extracted: SlackExtract): Promise<boolean> {
   const probe = pendingLoad;
   if (!probe || !extracted.messages.some((message) => message.kind === "message" && !probe.ids.has(message.id) && Date.parse(message.occurredAt) < probe.oldest)) return true;
   try {
-    const response = await chrome.runtime.sendMessage({ type: "history-load", site: "slack" });
+    const response = await sendMessage({ type: "history-load", site: "slack", sourceId, range: settings.slackBackfillRange });
     if (!response?.ok) return false;
     pendingLoad = null;
-    loadsThisVisit += 1;
+    if (response.progress) progress = response.progress;
     settings.slackHourBucket = response.bucket;
     settings.slackHourLoads = response.loads;
     return true;
@@ -423,7 +515,7 @@ function userActive(): boolean {
 }
 
 function releaseLock(): void {
-  chrome.runtime.sendMessage({ type: "scroll-lock", op: "release", site: "slack" });
+  void sendMessage({ type: "scroll-lock", op: "release", site: "slack" }).catch(handleError);
 }
 
 function saveScroll(container: HTMLElement): void {
@@ -462,9 +554,24 @@ function restoreScroll(): void {
 }
 
 function onUserInput(event: Event): void {
-  if (!event.isTrusted) return;
+  if (stopped || !event.isTrusted) return;
   lastUserInputAt = Date.now();
   schedule(0);
+}
+
+function onVisibilityChange(): void {
+  // Returning to a tab gets the same grace period as input, even before the pointer moves.
+  if (!document.hidden) lastUserInputAt = Date.now();
+  schedule(0);
+}
+
+function onSettingsChanged(changes: Record<string, chrome.storage.StorageChange>, area: string): void {
+  if (stopped || area !== "local") return;
+  const controls = ["slackEnabled", "paused", "slackBackfillEnabled", "slackBackfillRange", "includeDms", "includePrivate", "slackBlockedUntil"] as const;
+  if (controls.some((key) => key in changes && changes[key].newValue !== settings[key])) {
+    for (const key of controls) if (key in changes) Object.assign(settings, { [key]: changes[key].newValue });
+    schedule(0);
+  }
 }
 
 declare global {
@@ -478,21 +585,15 @@ function start(): void {
   for (const eventName of USER_INPUT_EVENTS) {
     window.addEventListener(eventName, onUserInput, { passive: true, capture: true });
   }
-  document.addEventListener("visibilitychange", () => schedule(0));
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    const controls = ["slackEnabled", "paused", "includeDms", "includePrivate", "slackBlockedUntil"] as const;
-    if (controls.some((key) => key in changes && changes[key].newValue !== settings[key])) {
-      for (const key of controls) if (key in changes) Object.assign(settings, { [key]: changes[key].newValue });
-      schedule(0);
-    }
-  });
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  chrome.storage.onChanged.addListener(onSettingsChanged);
 
   const root = document.body ?? document.documentElement;
   if (root) {
-    new MutationObserver(() => {
+    observer = new MutationObserver(() => {
       if (!running) schedule(200);
-    }).observe(root, { childList: true, subtree: true });
+    });
+    observer.observe(root, { childList: true, subtree: true });
   }
 
   void tick();
@@ -508,10 +609,10 @@ async function stopForToday(reason: string | null, now: Date, extracted: SlackEx
   const channel = extracted.channel;
   const id = channel?.sourceId ?? sourceId;
   const pauseReason = reason ?? settings.slackPauseReason ?? "paused for the rest of the day";
-  if (id) chrome.runtime.sendMessage({ type: "coverage", coverage: {
+  if (id) void sendMessage({ type: "coverage", coverage: {
     sourceId: id, expected: null, have: known.length, gaps: [], complete: false,
     reason: pauseReason, updatedAt: now.toISOString(),
-  } satisfies Coverage });
+  } satisfies Coverage }).catch(handleError);
   publish({ sourceId: id, title: channel?.title ?? "Slack", url: location.href, count: known.length,
     coverage: "Paused for the rest of the day.", error: `Slack paused for today: ${pauseReason}`, skipped: null });
   restoreScroll();

@@ -13,6 +13,72 @@ function make(...args: ConstructorParameters<typeof ExtensionFixture>) {
 afterEach(async () => { for (const h of active.splice(0)) await h.close(); });
 
 describe("real content script → service worker → helper → SQLite/Markdown", () => {
+  test("a reloaded extension retires stale scripts without rejected promises or view movement", async () => {
+    for (const failure of ["storage", "message"] as const) {
+      const h = make(undefined, { hidden: true });
+      await h.start();
+      await h.clock.advance(350);
+      h.contentContextError = failure;
+      h.mutate(() => h.list.insertAdjacentHTML("beforeend", row(400)));
+      await h.clock.advance(200);
+      expect(h.contentChanges.listeners).toHaveLength(0);
+      const calls = h.contentContextCalls;
+      const scrolls = h.scrolls.length;
+      const records = h.db.getSource(SOURCE_ID).length;
+      h.input("mousemove");
+      h.mutate(() => h.list.insertAdjacentHTML("beforeend", row(500)));
+      await h.clock.advance(60_000);
+      expect(h.contentContextCalls).toBe(calls);
+      expect(h.scrolls).toHaveLength(scrolls);
+      expect(h.db.getSource(SOURCE_ID)).toHaveLength(records);
+      expect(h.contentChanges.listeners).toHaveLength(0);
+      expect(h.errors).toEqual([]);
+    }
+  });
+
+  test("composer-linked threads save replies and closing the pane preserves all revisions", async () => {
+    const h = make(fixture("thread.html"), { url: "https://app.slack.com/client/T024BE7LD/C01ABCD2EFG" });
+    const pane = h.dom.document.querySelector("[data-qa='threads_flexpane']")!;
+    const parentTs = pane.getAttribute("data-thread-ts")!;
+    pane.removeAttribute("data-thread-ts");
+    pane.insertAdjacentHTML("beforeend", `<div class="c-texty_input_unstyled" data-thread-ts="${parentTs}"></div>`);
+    const parentRow = h.list.querySelector("[data-qa='virtual-list-item']")!.cloneNode(true);
+    pane.insertBefore(parentRow, pane.firstChild);
+    await h.start();
+    const records = h.db.getSource("slack:T024BE7LD:C01ABCD2EFG");
+    expect(records).toHaveLength(2);
+    expect(records.filter((record) => record.kind === "thread_reply")).toHaveLength(1);
+    h.mutate(() => pane.remove());
+    await h.clock.advance(200);
+    for (const record of records) {
+      expect(h.db.revisions(record.id)).toHaveLength(1);
+      expect(h.db.revisions(record.id)[0]?.deleted).toBe(false);
+    }
+  });
+
+  test("MCP coverage exists while a visible channel is waiting for reader input", async () => {
+    const h = make();
+    await h.start();
+    expect(h.scrolls).toHaveLength(0);
+    expect(h.db.coverage(SOURCE_ID)).toMatchObject({ have: 2, complete: false, reason: null });
+  });
+
+  test("live-shaped list scrolls its viewport and never captures sidebar previews", async () => {
+    const h = make(fixture("enterprise-channel.html"), {
+      url: "https://app.slack.com/client/ETEST123/C01ABCD2EFG",
+      hidden: true,
+      settings: { includePrivate: true }, // Synthetic unknown-privacy fixture: explicit opt-in.
+    });
+    await h.start();
+    const records = h.db.getSource("slack:ETEST123:C01ABCD2EFG");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.text).toBe("Synthetic channel message.");
+    expect(h.list.classList.contains("c-scrollbar__hider")).toBe(true);
+    expect(h.scrolls.length).toBeGreaterThan(0);
+    expect(h.scrolls[0]?.top).toBe(h.top);
+    expect(h.top).toBeGreaterThanOrEqual(800); // One step is at most half the 400px viewport.
+  });
+
   test("DM and private gating happens before sending records, and opt-in captures them", async () => {
     for (const [name, control, url, source] of [
       ["dm.html", "includeDms", "https://app.slack.com/client/TTEST/DTEST", "slack:TTEST:DTEST"],
@@ -171,7 +237,7 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     await h.start(); await h.clock.advance(2500);
     expect(h.storage.slackHourLoads).toBe(100);
     expect(h.db.coverage(SOURCE_ID)).toMatchObject({ complete: false, reason: "hourly load budget reached" });
-    expect(h.scrolls.map((scroll) => scroll.top)).toEqual([800, 1000]);
+    expect(h.scrolls.map((scroll) => scroll.top)).toEqual([800]);
     expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
   });
 
@@ -206,7 +272,9 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     Object.defineProperty(h.dom.document, "hidden", { value: false, writable: true });
     h.dom.document.dispatchEvent(new h.dom.window.Event("visibilitychange"));
     await h.clock.advance(0);
-    expect(h.scrolls).toHaveLength(2);
+    expect(h.scrolls).toHaveLength(1);
+    await h.clock.advance(30_000);
+    expect(h.scrolls.length).toBeGreaterThan(1);
   });
 
   test("mousemove interrupts a job; restore waits for idle and follows a history anchor", async () => {
@@ -224,7 +292,7 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     expect(h.scrolls).toHaveLength(steps);
     await h.clock.advance(201);
     expect(h.top).toBe(1600);
-    expect(h.db.coverage(SOURCE_ID)?.complete).toBe(true);
+    expect(h.db.coverage(SOURCE_ID)).toMatchObject({ complete: false, reason: "channel start reached; unopened threads may be missing" });
   });
 
   test("a person's own scroll supersedes the saved position", async () => {
@@ -248,7 +316,7 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     await h.clock.advance(30_000);
     expect(h.top).toBe(1600);
     expect(h.scrolls).toHaveLength(2);
-    expect(h.db.coverage(SOURCE_ID)).toBeNull();
+    expect(h.db.coverage(SOURCE_ID)).toMatchObject({ complete: false, reason: null });
   });
 
   test("disabling during input still restores the saved anchor once idle", async () => {
