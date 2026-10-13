@@ -10,6 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["chrome"],
     "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "outDir": "./dist"
   },
   "include": ["src/**/*"]

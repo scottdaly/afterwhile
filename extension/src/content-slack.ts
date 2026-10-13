@@ -161,7 +161,7 @@ async function step(): Promise<void> {
     savedScroll = null;
   }
 
-  const policy = channelPolicy(extracted.channel, settings);
+  const policy = channelPolicy(extracted.channel.kind, settings);
   if (!policy.capture) {
     publish({
       sourceId: extracted.channel.sourceId,

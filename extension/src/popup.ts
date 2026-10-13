@@ -49,7 +49,7 @@ function render(state: State): void {
   const url = document.querySelector("#pageUrl");
   const count = document.querySelector("#pageCount");
   const coverage = document.querySelector("#pageCoverage");
-  const error = document.querySelector("#pageError");
+  const error = document.querySelector<HTMLElement>("#pageError");
   if (title) title.textContent = page?.title || "Open a Slack channel to capture it.";
   if (url) url.textContent = page?.url || "";
   if (count) count.textContent = page ? `${page.count} on this page` : "";

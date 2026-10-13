@@ -29,18 +29,18 @@ const HOST_DESCRIPTION = "Saves web-app pages you read on this computer for loca
 export function browserManifestDirs(platform: string, home: string): string[] {
   if (platform === "darwin") {
     return [
-      path.join(home, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts"),
-      path.join(home, "Library", "Application Support", "Microsoft Edge", "NativeMessagingHosts"),
-      path.join(home, "Library", "Application Support", "Chromium", "NativeMessagingHosts"),
+      path.posix.join(home, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts"),
+      path.posix.join(home, "Library", "Application Support", "Microsoft Edge", "NativeMessagingHosts"),
+      path.posix.join(home, "Library", "Application Support", "Chromium", "NativeMessagingHosts"),
     ];
   }
   if (platform === "win32") {
     return [];
   }
   return [
-    path.join(home, ".config", "google-chrome", "NativeMessagingHosts"),
-    path.join(home, ".config", "microsoft-edge", "NativeMessagingHosts"),
-    path.join(home, ".config", "chromium", "NativeMessagingHosts"),
+    path.posix.join(home, ".config", "google-chrome", "NativeMessagingHosts"),
+    path.posix.join(home, ".config", "microsoft-edge", "NativeMessagingHosts"),
+    path.posix.join(home, ".config", "chromium", "NativeMessagingHosts"),
   ];
 }
 
@@ -78,7 +78,7 @@ export function planInstall(target: InstallTarget): InstallPlan {
     };
   }
   const files = browserManifestDirs(target.platform, target.home).map((dir) => ({
-    path: path.join(dir, `${NATIVE_HOST_ID}.json`),
+    path: path.posix.join(dir, `${NATIVE_HOST_ID}.json`),
     contents,
   }));
   return { platform: target.platform, files, registry: [] };

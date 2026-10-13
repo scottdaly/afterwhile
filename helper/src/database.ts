@@ -238,7 +238,7 @@ export class RecordDatabase {
     if (!match) return [];
     const limit = clampLimit(options.limit, 20);
     const where = ["records_fts MATCH ?", "r.deleted = 0", "r.revision = (SELECT MAX(revision) FROM records WHERE record_id = r.record_id)"];
-    const params: unknown[] = [match];
+    const params: Array<string | number> = [match];
     if (options.connection) {
       where.push("r.connection = ?");
       params.push(options.connection);
@@ -279,7 +279,7 @@ export class RecordDatabase {
       cursor = row?.cursor_at ?? null;
     }
     const where = ["r.deleted = 0", "r.revision = (SELECT MAX(revision) FROM records WHERE record_id = r.record_id)"];
-    const params: unknown[] = [];
+    const params: Array<string | number> = [];
     if (options.sourceId) {
       where.push("r.source_id = ?");
       params.push(options.sourceId);
@@ -324,7 +324,7 @@ export class RecordDatabase {
       "deleted = 0",
       "revision = (SELECT MAX(revision) FROM records r2 WHERE r2.record_id = records.record_id)",
     ];
-    const params: unknown[] = [sourceId];
+    const params: Array<string | number> = [sourceId];
     if (options.fromPosition != null) {
       where.push("position >= ?");
       params.push(options.fromPosition);
@@ -355,7 +355,7 @@ export class RecordDatabase {
     lastCaptured: string;
     coverage: Coverage | null;
   }> {
-    const params: unknown[] = [];
+    const params: Array<string | number> = [];
     let sql = `
       SELECT source_id, source_title, source_url, COUNT(*) AS record_count, MAX(captured_at) AS last_captured
       FROM records
@@ -508,7 +508,7 @@ export class RecordDatabase {
   }
 
   close(): void {
-    this.db.close();
+    this.db.close(true);
   }
 }
 

@@ -23,7 +23,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     process.stdout.write(helpText());
     return;
   }
-  if (command === "host") {
+  // Chrome supplies its origin, and Windows also supplies a parent window handle.
+  if (command === "host" || /^chrome-extension:\/\/[a-p]{32}\/$/.test(command)) {
     runHost();
     return;
   }

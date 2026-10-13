@@ -26,7 +26,7 @@ test("the product name is only spelled in the constants file", () => {
     for (const entry of readdirSync(dir)) {
       if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
       const full = path.join(dir, entry);
-      const rel = path.relative(root, full);
+      const rel = path.relative(root, full).split(path.sep).join("/");
       if (rel === path.join("extension", "dist") || rel.startsWith(`docs${path.sep}`) || rel.startsWith("docs/")) {
         continue;
       }

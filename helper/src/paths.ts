@@ -24,14 +24,14 @@ export function dataDir(options?: {
   const platform = options?.platform ?? process.platform;
   const home = options?.home ?? resolveHome(platform, env);
   if (platform === "darwin") {
-    return path.join(home, "Library", "Application Support", APP_NAME);
+    return path.posix.join(home, "Library", "Application Support", APP_NAME);
   }
   if (platform === "win32") {
     const local = env.LOCALAPPDATA || path.win32.join(home, "AppData", "Local");
     return path.win32.join(local, APP_NAME);
   }
-  const xdg = env.XDG_DATA_HOME || path.join(home, ".local", "share");
-  return path.join(xdg, APP_NAME);
+  const xdg = env.XDG_DATA_HOME || path.posix.join(home, ".local", "share");
+  return path.posix.join(xdg, APP_NAME);
 }
 
 export function filesDir(options?: {
@@ -45,7 +45,7 @@ export function filesDir(options?: {
   const platform = options?.platform ?? process.platform;
   const home = options?.home ?? resolveHome(platform, env);
   if (platform === "win32") return path.win32.join(home, APP_NAME);
-  return path.join(home, APP_NAME);
+  return path.posix.join(home, APP_NAME);
 }
 
 export function databasePath(options?: {

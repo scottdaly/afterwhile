@@ -42,11 +42,6 @@ function record(overrides: Partial<CaptureRecord> = {}): CaptureRecord {
     connection: "slack",
     connectionVersion: "0.1.0",
     kind: "message",
-    source: {
-      id: "slack:T024BE7LD:C01ABCD2EFG",
-      title: "#design-foundations",
-      url: "https://app.slack.com/client/T024BE7LD/C01ABCD2EFG",
-    },
     position: null,
     occurredAt: "2026-10-12T16:20:00.100Z",
     capturedAt: "2026-10-12T16:31:12.000Z",
@@ -298,7 +293,7 @@ describe("install", () => {
         extensionIds: [UNPACKED_EXTENSION_ID],
       });
       applyInstall(plan);
-      expect(readFileSync(plan.files[0]!.path, "utf8")).toContain(invocation.hostPath);
+      expect(JSON.parse(readFileSync(plan.files[0]!.path, "utf8")).path).toBe(invocation.hostPath);
       applyUninstall(plan);
       expect(() => readFileSync(plan.files[0]!.path, "utf8")).toThrow();
       const snippets = mcpSnippets(invocation.mcpCommand, invocation.mcpArgs);
@@ -402,8 +397,8 @@ describe("mcp client", () => {
   }, 20_000);
 });
 
-function textOf(result: { content?: Array<{ type: string; text?: string }> }): string {
-  return (result.content ?? [])
+function textOf(result: { [key: string]: unknown }): string {
+  return (Array.isArray(result.content) ? result.content : [])
     .filter((item) => item.type === "text")
     .map((item) => item.text ?? "")
     .join("\n");
