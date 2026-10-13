@@ -143,3 +143,13 @@ test("the offline queue applies backpressure before exhausting Chrome local stor
   expect(h.storage.pendingRecords).toEqual([]);
   expect(h.db.getSource(SOURCE_ID)).toHaveLength(2);
 });
+
+test("history load increments across tabs cannot overwrite each other and roll over by hour", async () => {
+  const h = make(undefined, { settings: { slackHourBucket: "2026-10-12T17", slackHourLoads: 90 } });
+  await h.startWorker();
+  const replies = await Promise.all(Array.from({ length: 10 }, (_, index) => h.send({ type: "history-load", site: "slack" }, { tab: { id: index, incognito: false } })));
+  expect(replies.map((reply) => reply.loads)).toEqual([91, 92, 93, 94, 95, 96, 97, 98, 99, 100]);
+  expect(h.storage.slackHourLoads).toBe(100);
+  await h.clock.advance(3_600_000);
+  expect(await h.send({ type: "history-load", site: "slack" })).toEqual({ ok: true, bucket: "2026-10-12T18", loads: 1 });
+});

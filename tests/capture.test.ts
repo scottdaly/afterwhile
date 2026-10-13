@@ -153,6 +153,29 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     expect(h.scrolls.map((step) => step.top)).toEqual([800, 600]);
   });
 
+  test("history drawn after the 350ms sample still spends the load budget", async () => {
+    const h = make(undefined, { hidden: true, settings: { slackHourBucket: "2026-10-12T17", slackHourLoads: 99 } });
+    h.onScroll = () => {
+      h.onScroll = null;
+      h.clock.setTimeout(() => h.mutate(() => { h.list.insertAdjacentHTML("afterbegin", row(90)); }), 600);
+    };
+    await h.start(); await h.clock.advance(2500);
+    expect(h.storage.slackHourLoads).toBe(100);
+    expect(h.db.coverage(SOURCE_ID)).toMatchObject({ complete: false, reason: "hourly load budget reached" });
+    expect(h.scrolls.map((scroll) => scroll.top)).toEqual([800, 1000]);
+    expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
+  });
+
+  test("unchanged overscan rows while moving are not a site failure", async () => {
+    const h = make();
+    await h.start(); await h.clock.advance(34_050);
+    expect(h.scrolls.map((scroll) => scroll.top)).toEqual([800, 600, 400]);
+    expect(h.storage.slackBlockedUntil ?? 0).toBe(0);
+    await h.clock.advance(10_000);
+    expect(h.storage.slackPauseReason).toBe("content stopped loading");
+    expect(h.scrolls.filter((scroll) => scroll.top > 0).slice(0, 5).map((scroll) => scroll.top)).toEqual([800, 600, 400, 200, 1000]);
+  });
+
   test("three no-progress steps at the top stop as pushback without spending budget", async () => {
     const h = make(undefined, { hidden: true }); h.top = 0;
     await h.start();

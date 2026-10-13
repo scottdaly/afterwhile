@@ -145,6 +145,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   connectNative();
+  if (message?.type === "history-load" && message.site === "slack") {
+    updateQueue(async () => {
+      const bucket = new Date().toISOString().slice(0, 13);
+      const stored = await chrome.storage.local.get(["slackHourBucket", "slackHourLoads"]);
+      const loads = (stored.slackHourBucket === bucket ? Number(stored.slackHourLoads) || 0 : 0) + 1;
+      await chrome.storage.local.set({ slackHourBucket: bucket, slackHourLoads: loads });
+      sendResponse({ ok: true, bucket, loads });
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === "records" && Array.isArray(message.records)) {
     updateQueue(async () => {
       const pending = [...queue, ...(message.records as CaptureRecord[])];
@@ -218,6 +228,8 @@ chrome.runtime.onInstalled.addListener(async () => {
     includePrivate: false,
     todayCount: 0,
     helperConnected: false,
+    slackHourBucket: "",
+    slackHourLoads: 0,
   };
   const stored = await chrome.storage.local.get(Object.keys(defaults));
   await chrome.storage.local.set(Object.fromEntries(

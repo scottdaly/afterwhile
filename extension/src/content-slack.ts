@@ -35,6 +35,7 @@ let savedScroll: { container: HTMLElement; rowTs: string | null; offset: number;
 let restorePending = false;
 let noProgressSteps = 0;
 let nextScrollAt = 0;
+let pendingLoad: { ids: Set<string>; oldest: number } | null = null;
 let lastUserInputAt = Date.now();
 let timer: number | null = null;
 let timerAt = 0;
@@ -53,7 +54,6 @@ async function loadSettings(): Promise<void> {
   if (settings.slackHourBucket !== bucket) {
     settings.slackHourBucket = bucket;
     settings.slackHourLoads = 0;
-    await chrome.storage.local.set({ slackHourBucket: bucket, slackHourLoads: 0 });
   }
 }
 
@@ -203,6 +203,7 @@ async function step(): Promise<void> {
     restorePending = false;
     noProgressSteps = 0;
     nextScrollAt = 0;
+    pendingLoad = null;
     releaseLock();
   }
 
@@ -238,7 +239,7 @@ async function step(): Promise<void> {
     return;
   }
 
-  if (!await capture(extracted)) {
+  if (!await countHistoryLoad(extracted) || !await capture(extracted)) {
     releaseLock();
     schedule(1000);
     return;
@@ -320,6 +321,12 @@ async function step(): Promise<void> {
     schedule(1500);
     return;
   }
+  await loadSettings();
+  if (settings.slackHourLoads >= hourlyBudget || settings.slackBlockedUntil > Date.now() || !settings.slackEnabled || settings.paused) {
+    releaseLock();
+    schedule(0);
+    return;
+  }
 
   const container = scrollContainer();
   if (!container) {
@@ -339,6 +346,7 @@ async function step(): Promise<void> {
   const beforeIds = channelMessages.map((message) => message.id);
   const beforeOldest = channelMessages.reduce((min, message) => Math.min(min, Date.parse(message.occurredAt)), Number.POSITIVE_INFINITY);
   const before = { scrollTop: container.scrollTop, rowIds: beforeIds };
+  pendingLoad = { ids: new Set(beforeIds), oldest: beforeOldest };
   const stepPx = Math.min(scrollStepPx(container.clientHeight), Math.floor(container.clientHeight * decision.maxStepRatio));
   container.scrollTop = Math.max(0, container.scrollTop - stepPx);
   savedScroll!.expectedTop = container.scrollTop;
@@ -373,9 +381,9 @@ async function step(): Promise<void> {
   const after = { scrollTop: container.scrollTop, rowIds: afterMessages.map((message) => message.id) };
   stalled = drawingStalled(before, after);
   const sameRows = before.rowIds.join("\n") === after.rowIds.join("\n");
-  if (!sameRows) noProgressSteps = 0;
-  else if (!document.hidden || before.scrollTop === after.scrollTop) noProgressSteps += 1;
-  if (!await capture(afterExtract)) {
+  if (!sameRows || before.scrollTop !== after.scrollTop) noProgressSteps = 0;
+  else noProgressSteps += 1;
+  if (!await countHistoryLoad(afterExtract) || !await capture(afterExtract)) {
     releaseLock();
     schedule(1000);
     return;
@@ -384,23 +392,28 @@ async function step(): Promise<void> {
     await stopForToday("content stopped loading", new Date(), afterExtract);
     return;
   }
-  const newOlder = afterMessages.some(
-    (message) => !beforeIds.includes(message.id) && Date.parse(message.occurredAt) < beforeOldest,
-  );
-  if (newOlder) {
-    loadsThisVisit += 1;
-    settings.slackHourLoads += 1;
-    await chrome.storage.local.set({
-      slackHourBucket: settings.slackHourBucket,
-      slackHourLoads: settings.slackHourLoads,
-    });
-  }
   if (userActive()) {
     restoreScroll();
     releaseLock();
     schedule(1000);
   } else {
     schedule(Math.max(0, nextScrollAt - Date.now()));
+  }
+}
+
+async function countHistoryLoad(extracted: SlackExtract): Promise<boolean> {
+  const probe = pendingLoad;
+  if (!probe || !extracted.messages.some((message) => message.kind === "message" && !probe.ids.has(message.id) && Date.parse(message.occurredAt) < probe.oldest)) return true;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "history-load", site: "slack" });
+    if (!response?.ok) return false;
+    pendingLoad = null;
+    loadsThisVisit += 1;
+    settings.slackHourBucket = response.bucket;
+    settings.slackHourLoads = response.loads;
+    return true;
+  } catch {
+    return false;
   }
 }
 

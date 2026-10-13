@@ -93,7 +93,7 @@ export class ExtensionFixture {
   constructor(html = page(row(100) + row(300)), options: { hidden?: boolean; settings?: Record<string, any>; url?: string; hostMode?: HostMode } = {}) {
     this.dom = parseHTML(html);
     Object.defineProperty(this.dom.document, "hidden", { value: options.hidden ?? false, writable: true });
-    this.storage = { slackEnabled: true, ...options.settings };
+    this.storage = { slackEnabled: true, slackHourLoads: 0, ...options.settings };
     this.url = options.url ?? SLACK_URL;
     this.hostMode = options.hostMode ?? "healthy";
     this.configureList();
