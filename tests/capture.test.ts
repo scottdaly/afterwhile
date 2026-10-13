@@ -111,6 +111,15 @@ describe("real content script → service worker → helper → SQLite/Markdown"
     expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
   });
 
+  test("an undrawn timestamp between neighbours is not proof of a deletion", async () => {
+    const h = make(page(row(100) + row(200) + row(300))); await h.start();
+    const middle = h.db.getSource(SOURCE_ID)[1]!;
+    h.mutate(() => { h.list.querySelectorAll("[data-qa='virtual-list-item']")[1]!.querySelector("[data-ts]")!.remove(); });
+    await h.clock.advance(200);
+    expect(h.db.revisions(middle.id)).toHaveLength(1);
+    expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
+  });
+
   test("rich text captures all paragraphs, lists and code", async () => {
     const rich = row(100, "First paragraph").replace("</div></div>", `</div>
       <div class="p-rich_text_section">Second paragraph</div>

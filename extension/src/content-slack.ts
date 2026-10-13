@@ -80,7 +80,7 @@ function publish(page: PageSnapshot): void {
 }
 
 async function capture(extracted: SlackExtract): Promise<boolean> {
-  const applied = applyVisible(known, extracted.messages);
+  const applied = applyVisible(known, extracted.messages, extracted.canInferDeletes);
   const records = [
     ...applied.upserts.map((draft) => toRecord(draft)),
     ...applied.deleted.map((message) => toRecord(message, true)),

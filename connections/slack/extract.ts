@@ -38,6 +38,7 @@ export interface SlackDraft {
 }
 
 export interface SlackExtract {
+  canInferDeletes: boolean;
   status: "ok" | "stopped";
   reason: string | null;
   pushback: string | null;
@@ -93,6 +94,7 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   const now = options.now ?? new Date();
   const oldestDays = options.oldestDays ?? 30;
   const empty: SlackExtract = {
+    canInferDeletes: false,
     status: "ok",
     reason: null,
     pushback: null,
@@ -118,11 +120,15 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   const channel = readChannel(document, ids, options.url);
   const list = sliceNodes(document.querySelectorAll(selectors.messageList)).find((node) => !node.closest(selectors.threadPane));
   const messages = list ? readMessages(list, channel) : [];
+  const roots: QueryRoot[] = list ? [list] : [];
   const channelIds = new Set(messages.map((message) => message.id));
   for (const pane of sliceNodes(document.querySelectorAll(selectors.threadPane))) {
     const parent = pane.getAttribute(selectors.threadTsAttr);
     // A thread can remain open from another channel; its own source is unverified.
-    if (parent && channelIds.has(`${channel.sourceId}:${parent}`)) messages.push(...readMessages(pane, channel));
+    if (parent && channelIds.has(`${channel.sourceId}:${parent}`)) {
+      roots.push(pane);
+      messages.push(...readMessages(pane, channel));
+    }
   }
   const listText = (list?.textContent ?? "").replace(/\s+/g, " ").trim();
   const hasTimestamp = list?.querySelector(selectors.timestamp) != null;
@@ -141,6 +147,7 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   const reachedOldest = messages.length > 0 && oldest <= cutoff;
 
   return {
+    canInferDeletes: roots.every((root) => sliceNodes(root.querySelectorAll(selectors.message)).every((node) => messageTimestamp(node) != null)),
     status: "ok",
     reason: null,
     pushback: null,
@@ -154,12 +161,14 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
 export function planUpdates(
   known: KnownMessage[],
   visible: SlackDraft[],
+  canInferDeletes = true,
 ): { upserts: SlackDraft[]; deletedIds: string[] } {
   const key = (id: string, pane: string) => `${pane}:${id}`;
   const visibleIds = new Set(visible.map((message) => key(message.id, paneId(message))));
   const visibleRecordIds = new Set(visible.map((message) => message.id));
   const previous = new Map(known.map((message) => [key(message.id, message.paneId ?? "channel"), message]));
   const upserts = visible.filter((message) => message.text && previous.get(key(message.id, paneId(message)))?.text !== message.text);
+  if (!canInferDeletes) return { upserts, deletedIds: [] };
 
   const ordered = [...known].sort((a, b) =>
     (a.paneId ?? "channel").localeCompare(b.paneId ?? "channel") || compareKnown(a, b),
@@ -182,8 +191,9 @@ export function planUpdates(
 export function applyVisible(
   known: KnownMessage[],
   visible: SlackDraft[],
+  canInferDeletes = true,
 ): { known: KnownMessage[]; upserts: SlackDraft[]; deleted: KnownMessage[] } {
-  const plan = planUpdates(known, visible);
+  const plan = planUpdates(known, visible, canInferDeletes);
   const deleted = known.filter((message) => plan.deletedIds.includes(message.id));
   const next = known.filter((message) => !plan.deletedIds.includes(message.id));
   for (const message of visible) {
@@ -273,10 +283,8 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
   const nodes = sliceNodes(root.querySelectorAll(selectors.message));
   const messages: SlackDraft[] = [];
   for (const node of nodes) {
-    const ts =
-      node.getAttribute(selectors.timestampAttr) ??
-      node.querySelector(selectors.timestamp)?.getAttribute(selectors.timestampAttr);
-    if (!ts || !/^\d+\.\d+$/.test(ts)) continue;
+    const ts = messageTimestamp(node);
+    if (!ts) continue;
     const blocks = sliceNodes(node.querySelectorAll(selectors.messageText));
     const text = blocks
       .filter((block) => !blocks.includes(block.parentElement?.closest(selectors.messageText) as QueryEl))
@@ -310,6 +318,11 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
     });
   }
   return messages;
+}
+
+function messageTimestamp(node: QueryEl): string | null {
+  const ts = node.getAttribute(selectors.timestampAttr) ?? node.querySelector(selectors.timestamp)?.getAttribute(selectors.timestampAttr);
+  return ts && /^\d+\.\d+$/.test(ts) ? ts : null;
 }
 
 function sliceNodes(list: ArrayLike<QueryEl>): QueryEl[] {
