@@ -189,3 +189,13 @@ test("a failed queue preload is retried before a new capture can overwrite the b
   expect(h.db.getSource(SOURCE_ID)).toHaveLength(3);
   expect(h.storage.pendingRecords).toEqual([]);
 });
+
+test("worker restart preserves the site lock until its owner releases it", async () => {
+  const h = make(); await h.startWorker();
+  expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" })).toEqual({ ok: true });
+  await h.startWorker();
+  const otherTab = { tab: { id: 3, incognito: false } };
+  expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" }, otherTab)).toEqual({ ok: false });
+  expect(await h.send({ type: "scroll-lock", op: "release", site: "slack" })).toEqual({ ok: true });
+  expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" }, otherTab)).toEqual({ ok: true });
+});

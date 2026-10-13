@@ -1,4 +1,3 @@
-import { SiteScrollLock } from "../../connections/slack/pace.ts";
 import {
   chunkRecords,
   NATIVE_HOST_ID,
@@ -8,7 +7,6 @@ import {
   type PageSnapshot,
 } from "../../shared/src/index.ts";
 
-const slackLock = new SiteScrollLock();
 let port: chrome.runtime.Port | null = null;
 let reconnectTimer: number | null = null;
 const queue: CaptureRecord[] = [];
@@ -30,6 +28,11 @@ function updateQueue(work: () => Promise<void>): Promise<void> {
   });
   pendingWork = result.catch((error) => console.error(`queue ${String(error)}`));
   return result;
+}
+
+async function releaseScrollLock(tabId: number): Promise<void> {
+  const stored = await chrome.storage.session.get("slackScrollTab");
+  if (stored.slackScrollTab === tabId) await chrome.storage.session.set({ slackScrollTab: null });
 }
 
 function badge(on: boolean): void {
@@ -191,13 +194,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false });
       return false;
     }
-    if (message.op === "release") {
-      slackLock.release(tabId);
-      sendResponse({ ok: true });
-      return false;
-    }
-    sendResponse({ ok: slackLock.tryAcquire(tabId) });
-    return false;
+    updateQueue(async () => {
+      if (message.op === "release") {
+        await releaseScrollLock(tabId);
+        sendResponse({ ok: true });
+        return;
+      }
+      const stored = await chrome.storage.session.get("slackScrollTab");
+      const ok = stored.slackScrollTab == null || stored.slackScrollTab === tabId;
+      if (ok && stored.slackScrollTab !== tabId) await chrome.storage.session.set({ slackScrollTab: tabId });
+      sendResponse({ ok });
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
   }
   if (message?.type === "idle-state") {
     chrome.idle.queryState(30, (state) => sendResponse({ state }));
@@ -232,11 +240,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  slackLock.release(tabId);
+  void updateQueue(() => releaseScrollLock(tabId));
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changes) => {
-  if (changes.status === "loading") slackLock.release(tabId);
+  if (changes.status === "loading") void updateQueue(() => releaseScrollLock(tabId));
 });
 
 chrome.storage.onChanged.addListener(() => {

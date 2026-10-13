@@ -76,20 +76,3 @@ export function decidePace(snapshot: PaceSnapshot, rng: () => number = Math.rand
   }
   return { action: "scroll", pauseMs: nextPauseMs(rng), maxStepRatio: 0.5 };
 }
-
-/** One scrolling job per site across tabs. */
-export class SiteScrollLock {
-  private holder: number | null = null;
-
-  tryAcquire(tabId: number): boolean {
-    if (this.holder == null || this.holder === tabId) {
-      this.holder = tabId;
-      return true;
-    }
-    return false;
-  }
-
-  release(tabId: number): void {
-    if (this.holder === tabId) this.holder = null;
-  }
-}

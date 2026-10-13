@@ -67,6 +67,7 @@ export class ExtensionFixture {
   readonly db = new RecordDatabase(path.join(this.root, "records.db"));
   readonly dom: ReturnType<typeof parseHTML>;
   readonly storage: Record<string, any>;
+  readonly sessionStorage: Record<string, any> = {};
   readonly scrolls: Array<{ at: number; top: number }> = [];
   readonly sent: any[] = [];
   readonly errors: unknown[][] = [];
@@ -151,6 +152,13 @@ export class ExtensionFixture {
         return structuredClone(Object.fromEntries(names.filter((key) => key in this.storage).map((key) => [key, this.storage[key]])));
       },
       set: async (values: Record<string, unknown>) => this.setStorage(values),
+    }, session: {
+      get: async (key: string) => structuredClone({ [key]: this.sessionStorage[key] }),
+      set: async (values: Record<string, unknown>) => {
+        const updates = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: this.sessionStorage[key], newValue: value }]));
+        Object.assign(this.sessionStorage, structuredClone(values));
+        this.workerChanges.emit(updates, "session");
+      },
     }, onChanged: changes };
   }
 
@@ -169,6 +177,7 @@ export class ExtensionFixture {
   }
 
   async startWorker() {
+    for (const port of this.ports) if (!port.disconnected) port.disconnect();
     for (const id of this.workerTimers) this.clock.clearTimeout(id);
     this.workerTimers = [];
     this.workerChanges = new Events();

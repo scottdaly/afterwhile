@@ -29,7 +29,7 @@ Selectors in `selectors.json` are **unverified**. They were written from the bui
 - Steps move at most half the visible height. Pauses vary from about 0.5s to 2.5s, with an occasional longer pause.
 - Mutation-driven captures do not advance the next scroll deadline. Internal storage updates do not wake the reader.
 - After each step the drawn message ids must change. A background tab whose rows do not draw is stalled and resumed only once it is visible and idle.
-- One scroll job per site at a time, coordinated by the service worker.
+- One scroll job per site at a time, coordinated by the service worker. Its owner is kept in session storage across worker restarts and released on tab removal or navigation.
 - Restore uses a row timestamp and viewport offset, with distance from the bottom as a fallback when that row is virtualized away. Input waits request restoration once the person is idle; restoration never moves an active person's view. Their own scroll supersedes the saved position.
 - Three consecutive steps without new drawn rows stop with `content stopped loading`, including when `scrollTop` is already zero and the beginning selector misses. Hidden tabs that move without redrawing wait for visibility and idle instead.
 - Pushback pauses Slack until the next local midnight. Already saved messages stay saved. The popup shows the reason.
