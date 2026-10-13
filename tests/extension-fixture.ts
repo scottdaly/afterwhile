@@ -75,6 +75,7 @@ export class ExtensionFixture {
   readonly contentChanges = new Events();
   workerChanges = new Events();
   installed = new Events();
+  tabUpdates = new Events();
   runtimeMessages = new Events();
   hostMode: HostMode = "healthy";
   tabs: any[] = [{ id: 1, incognito: false }, { id: 2, incognito: true }];
@@ -171,6 +172,7 @@ export class ExtensionFixture {
     this.workerChanges = new Events();
     this.runtimeMessages = new Events();
     this.installed = new Events();
+    this.tabUpdates = new Events();
     const chrome = {
       storage: this.storageApi(this.workerChanges),
       runtime: { onMessage: this.runtimeMessages, onInstalled: this.installed, connectNative: () => this.connectHost() },
@@ -181,7 +183,7 @@ export class ExtensionFixture {
         unregisterContentScripts: async () => { this.registered = []; },
         executeScript: async (details: any) => { this.injections.push(details); },
       },
-      tabs: { onRemoved: new Events(), query: async () => this.tabs },
+      tabs: { onRemoved: new Events(), onUpdated: this.tabUpdates, query: async () => this.tabs },
       idle: { setDetectionInterval() {}, queryState: (_seconds: number, reply: (state: string) => void) => reply("active") },
     };
     runInNewContext((await ExtensionFixture.getBundles()).worker, {

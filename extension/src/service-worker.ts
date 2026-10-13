@@ -216,6 +216,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   slackLock.release(tabId);
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changes) => {
+  if (changes.status === "loading") slackLock.release(tabId);
+});
+
 chrome.storage.onChanged.addListener(() => {
   refreshBadge().catch(() => undefined);
 });

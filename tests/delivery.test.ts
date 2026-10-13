@@ -153,3 +153,10 @@ test("history load increments across tabs cannot overwrite each other and roll o
   await h.clock.advance(3_600_000);
   expect(await h.send({ type: "history-load", site: "slack" })).toEqual({ ok: true, bucket: "2026-10-12T18", loads: 1 });
 });
+
+test("navigating the holder tab releases its site lock", async () => {
+  const h = make(); await h.startWorker();
+  expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" })).toEqual({ ok: true });
+  h.tabUpdates.emit(1, { status: "loading" }, { id: 1, url: "https://example.invalid/" });
+  expect(await h.send({ type: "scroll-lock", op: "acquire", site: "slack" }, { tab: { id: 3, incognito: false } })).toEqual({ ok: true });
+});
