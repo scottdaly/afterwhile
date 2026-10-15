@@ -66,10 +66,11 @@ On a Mac or Windows machine, with Chrome:
 3. Open `chrome://extensions`, turn on Developer mode, and Load unpacked `extension/dist`.
 4. Open the afterwhile popup. Read the Slack risks, click Turn on, and allow `https://app.slack.com/*`.
 5. Leave DMs and private channels off unless you want those too.
-6. Open a public Slack channel in https://app.slack.com. Visible messages should show up in the popup and in that day's Markdown within a couple of seconds.
-7. Point Claude Code or Codex at the snippet `install` printed, then ask what was said in that channel. The reply should come from `search` or `recent` and include the channel URL.
+6. Open a public Slack channel in https://app.slack.com. Visible messages should show up in the popup and in that day's Markdown within a couple of seconds. Automatic backfill starts off, so capture can run without scrolling.
+7. If you want older history, turn on **Automatic backfill** in the popup and choose **Past 7 days**, **Past 30 days**, or **All available history**. This applies to opened channels allowed by your capture settings. It waits while you use the tab, reads in batches of 20 history loads, rests for a minute between batches, and pauses at 100 loads an hour. The popup shows the oldest saved date and when it can resume. Per-channel progress survives reloads; if Slack no longer has the older rows loaded, it retraces saved history at the same pace. These steps also spend the load allowance. A channel must remain open for reading to continue. Open threads separately to capture their replies.
+8. Point Claude Code or Codex at the snippet `install` printed, then ask what was said in that channel. The reply should come from `search` or `recent` and include the channel URL.
 
-Slack selectors are unverified. See `connections/slack/NOTES.md`. If the popup says "capture stopped working", the live page does not match the fixtures and nothing from that broken page is saved.
+The channel and thread selectors have been tested on one modern Slack layout; other layouts, private/DM icons, edit markers and beginning banners still need validation. See `connections/slack/NOTES.md`. If the popup says "capture stopped working", the live page does not match the fixtures and nothing from that broken page is saved.
 
 The extension does not run in Incognito. It does not request every site at install. It only scrolls a channel you already opened, and only when you are not using that tab.
 

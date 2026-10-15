@@ -155,6 +155,26 @@ describe("storage", () => {
     db.close();
   });
 
+  test("Slack coverage counts saved messages across visits without counting revisions", () => {
+    const dirsForTest = tempDirs();
+    dirs.push(dirsForTest.root);
+    const db = new RecordDatabase(path.join(dirsForTest.data, "records.db"));
+    const first = record();
+    const second = record({ id: `${first.source.id}:1791822300.000200` });
+    const coverage: Coverage = { sourceId: first.source.id, expected: null, have: 1, gaps: [], complete: false, reason: null, updatedAt: first.capturedAt };
+    acceptCoverage(db, coverage);
+    expect(db.coverage(first.source.id)?.have).toBe(0);
+    acceptRecords(db, dirsForTest.files, [first, second]);
+    expect(db.coverage(first.source.id)?.have).toBe(2);
+    acceptRecords(db, dirsForTest.files, [{ ...first, text: "Synthetic edit for the coverage regression." }]);
+    acceptCoverage(db, coverage);
+    expect(db.coverage(first.source.id)?.have).toBe(2);
+    acceptRecords(db, dirsForTest.files, [{ ...second, deleted: true, text: "" }]);
+    acceptCoverage(db, coverage);
+    expect(db.coverage(first.source.id)?.have).toBe(1);
+    db.close();
+  });
+
   test("coverage hint names the gap", () => {
     const dirsForTest = tempDirs();
     dirs.push(dirsForTest.root);

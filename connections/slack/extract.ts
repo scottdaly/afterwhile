@@ -73,7 +73,9 @@ export function parseSlackUrl(url: string): { teamId: string; channelId: string 
   if (client < 0 || parts.length < client + 3) return null;
   const teamId = parts[client + 1] ?? "";
   const channelId = parts[client + 2] ?? "";
-  if (!/^T[A-Z0-9]+$/.test(teamId) || !/^[CDG][A-Z0-9]+$/.test(channelId)) return null;
+  // Enterprise client routes use an E-prefixed organization scope. Preserve
+  // that visible scope in IDs and links instead of reading hidden workspace state.
+  if (!/^[TE][A-Z0-9]+$/.test(teamId) || !/^[CDG][A-Z0-9]+$/.test(channelId)) return null;
   return { teamId, channelId };
 }
 
@@ -123,9 +125,14 @@ export function extractSlack(document: QueryRoot, options: ExtractOptions): Slac
   const roots: QueryRoot[] = list ? [list] : [];
   const channelIds = new Set(messages.map((message) => message.id));
   for (const pane of sliceNodes(document.querySelectorAll(selectors.threadPane))) {
-    const parent = pane.getAttribute(selectors.threadTsAttr);
-    // A thread can remain open from another channel; its own source is unverified.
-    if (parent && channelIds.has(`${channel.sourceId}:${parent}`)) {
+    const parent = threadTimestamp(pane);
+    const root = pane.querySelector(selectors.threadRoot);
+    // Modern Slack identifies the thread's source on its rendered root row.
+    // Legacy markup needs its parent visible in the current channel instead.
+    const sameChannel = root
+      ? root.getAttribute(selectors.channelIdAttr) === channel.channelId && messageTimestamp(root) === parent
+      : parent != null && channelIds.has(`${channel.sourceId}:${parent}`);
+    if (parent && sameChannel) {
       roots.push(pane);
       messages.push(...readMessages(pane, channel));
     }
@@ -250,9 +257,11 @@ function readChannel(
   const dm = header?.querySelector(selectors.dmIndicator) != null || ids.channelId.startsWith("D");
   const lock = header?.querySelector(selectors.privateChannelLock) != null;
   const publicId = ids.channelId.startsWith("C");
+  const modernHeader = header?.closest(".p-view_header") != null;
+  const publicIcon = header?.querySelector(selectors.publicChannelIcon) != null;
   let kind: SlackChannel["kind"];
   if (dm) kind = "dm";
-  else if (lock || !publicId || !header?.querySelector(selectors.channelName)?.textContent?.trim()) kind = "private";
+  else if (lock || !publicId || (modernHeader && !publicIcon) || !header?.querySelector(selectors.channelName)?.textContent?.trim()) kind = "private";
   else kind = "public";
 
   const nameEl =
@@ -285,6 +294,11 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
   for (const node of nodes) {
     const ts = messageTimestamp(node);
     if (!ts) continue;
+    const pane = node.closest(selectors.threadPane);
+    const threadTs = pane ? threadTimestamp(pane) : null;
+    // Slack repeats the parent in the thread list; do not change its channel
+    // record's kind or revision merely because the pane opened.
+    if (pane && ts === threadTs) continue;
     const blocks = sliceNodes(node.querySelectorAll(selectors.messageText));
     const text = blocks
       .filter((block) => !blocks.includes(block.parentElement?.closest(selectors.messageText) as QueryEl))
@@ -298,8 +312,6 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
     const authorId = authorEl?.getAttribute(selectors.authorIdAttr)?.trim() ?? "";
     const repliesText = node.querySelector(selectors.threadReplies)?.textContent ?? "";
     const replyMatch = repliesText.match(/(\d+)/);
-    const pane = node.closest(selectors.threadPane);
-    const threadTs = pane?.getAttribute(selectors.threadTsAttr) ?? null;
     const occurredMs = Number(ts) * 1000;
     if (!Number.isFinite(occurredMs)) continue;
     messages.push({
@@ -318,6 +330,12 @@ function readMessages(root: QueryRoot, channel: SlackChannel): SlackDraft[] {
     });
   }
   return messages;
+}
+
+function threadTimestamp(pane: QueryEl): string | null {
+  return pane.getAttribute(selectors.threadTsAttr)
+    ?? pane.querySelector(selectors.threadParent)?.getAttribute(selectors.threadTsAttr)
+    ?? null;
 }
 
 function messageTimestamp(node: QueryEl): string | null {

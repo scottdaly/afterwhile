@@ -15,6 +15,11 @@ export function acceptRecords(db: RecordDatabase, filesRoot: string, records: un
   const summary = db.insertRecords(valid);
   // A retry may follow a crash after SQLite committed but before Markdown was written.
   refreshRecords(db, filesRoot, valid.map((record) => record.id));
+  // Coverage can arrive before the queued batch reaches the helper.
+  for (const sourceId of new Set(valid.filter((record) => record.connection === "slack").map((record) => record.source.id))) {
+    const coverage = db.coverage(sourceId);
+    if (coverage && coverage.expected == null) acceptCoverage(db, coverage);
+  }
   log(
     `records new=${summary.inserted} revisions=${summary.revisions} deleted=${summary.deleted} unchanged=${summary.unchanged} rejected=${records.length - valid.length} ids=${summary.ids.join(",")}`,
   );
@@ -22,8 +27,17 @@ export function acceptRecords(db: RecordDatabase, filesRoot: string, records: un
 }
 
 export function acceptCoverage(db: RecordDatabase, coverage: Coverage): void {
-  db.updateCoverage(coverage);
-  log(`coverage source=${coverage.sourceId} have=${coverage.have} complete=${coverage.complete} reason=${coverage.reason ?? ""}`);
+  // A reopened Slack tab knows only its current visit. Coverage's saved total
+  // must include earlier visits, and exclude superseded/deleted revisions.
+  const slack = coverage.sourceId.startsWith("slack:") && coverage.expected == null;
+  const saved = slack
+    ? db.sources("slack").find((source) => source.sourceId === coverage.sourceId)
+    : null;
+  const current = slack
+    ? { ...coverage, have: saved?.recordCount ?? 0 }
+    : coverage;
+  db.updateCoverage(current);
+  log(`coverage source=${current.sourceId} have=${current.have} complete=${current.complete} reason=${current.reason ?? ""}`);
 }
 
 export function forgetSaved(
