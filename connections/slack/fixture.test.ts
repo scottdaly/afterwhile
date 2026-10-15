@@ -59,6 +59,30 @@ describe("slack fixtures", () => {
     expect(first?.source.url).toBe(URL);
   });
 
+  test("live-shaped channel list excludes sidebar rows and unknown privacy stays off", () => {
+    const result = extractSlack(doc("enterprise-channel.html"), {
+      url: "https://app.slack.com/client/ETEST123/C01ABCD2EFG",
+    });
+    expect(result.status).toBe("ok");
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.text).toBe("Synthetic channel message.");
+    expect(result.channel?.title).toBe("synthetic-public-channel");
+    expect(result.channel?.kind).toBe("private");
+    expect(channelPolicy(result.channel!.kind, { includeDms: false, includePrivate: false }).capture).toBe(false);
+  });
+
+  test("live-shaped public icon is required; lock or unknown icons stay private", () => {
+    for (const [icon, kind] of [["channel-filled", "public"], ["lock-filled", "private"], ["unknown", "private"]] as const) {
+      const document = doc("enterprise-channel.html");
+      const node = document.querySelector(".p-view_header__channel_title_icon")!;
+      node.setAttribute("data-inline-channel-type-icon", icon);
+      node.querySelector("svg")!.setAttribute("data-qa", icon);
+      const result = extractSlack(document, { url: "https://app.slack.com/client/ETEST123/C01ABCD2EFG" });
+      expect(result.channel?.kind).toBe(kind);
+      expect(channelPolicy(result.channel!.kind, { includeDms: false, includePrivate: false }).capture).toBe(kind === "public");
+    }
+  });
+
   test("reload of the same messages does not emit duplicates", () => {
     const first = extractSlack(doc("channel.html"), { url: URL });
     const applied = applyVisible([], first.messages);
@@ -218,6 +242,49 @@ describe("pacing", () => {
     const loads = older.messages.filter((message) => !seen.has(message.id) && Date.parse(message.occurredAt) < oldest);
     expect(loads).toHaveLength(1);
     expect(loads[0]?.text).toContain("Yesterday");
+  });
+
+  test("enterprise client URLs capture under the visible organization scope", () => {
+    const url = "https://app.slack.com/client/ETEST123/C01ABCD2EFG";
+    expect(parseSlackUrl(url)).toEqual({ teamId: "ETEST123", channelId: "C01ABCD2EFG" });
+    const result = extractSlack(doc("channel.html"), { url });
+    expect(result.status).toBe("ok");
+    expect(result.channel?.sourceId).toBe("slack:ETEST123:C01ABCD2EFG");
+    expect(result.messages.length).toBeGreaterThan(0);
+    expect(result.messages.every((message) => message.source.url === url)).toBe(true);
+  });
+
+  test("composer identifies thread replies without revising the repeated parent", () => {
+    const document = doc("thread.html");
+    const pane = document.querySelector("[data-qa='threads_flexpane']")!;
+    const parent = pane.getAttribute("data-thread-ts")!;
+    pane.removeAttribute("data-thread-ts");
+    pane.insertAdjacentHTML("beforeend", `<div class="c-texty_input_unstyled" data-thread-ts="${parent}"></div>`);
+    const root = document.querySelector("[data-qa='virtual-list'] [data-qa='virtual-list-item']")!.cloneNode(true);
+    pane.insertBefore(root, pane.firstChild);
+    const result = extractSlack(document, { url: URL });
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages.map((message) => message.kind)).toEqual(["message", "thread_reply"]);
+    expect(result.messages[1]?.fields.threadTs).toBe(parent);
+    expect(new Set(result.messages.map((message) => message.id)).size).toBe(2);
+    document.querySelector(".c-texty_input_unstyled")!.setAttribute("data-thread-ts", "1791800000.000100");
+    expect(extractSlack(document, { url: URL }).messages).toHaveLength(1);
+  });
+
+  test("rendered thread root verifies its channel when the main-list parent is offscreen", () => {
+    const document = doc("thread.html");
+    const pane = document.querySelector("[data-qa='threads_flexpane']")!;
+    const parentRow = document.querySelector("[data-qa='virtual-list'] [data-qa='virtual-list-item']")!;
+    const root = parentRow.cloneNode(true) as Element;
+    root.classList.add("c-message_kit__thread_message--root");
+    root.setAttribute("data-msg-channel-id", "C01ABCD2EFG");
+    pane.insertBefore(root, pane.firstChild);
+    parentRow.remove();
+    const result = extractSlack(document, { url: URL });
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.kind).toBe("thread_reply");
+    root.setAttribute("data-msg-channel-id", "COTHER123");
+    expect(extractSlack(document, { url: URL }).messages).toHaveLength(0);
   });
 
   test("parse rejects a non-client url", () => {

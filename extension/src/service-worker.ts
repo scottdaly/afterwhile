@@ -1,3 +1,5 @@
+import slackManifest from "../../connections/slack/connection.json";
+import { backfillRange, readProgress, progressKey, statsKey, BACKFILL_PAUSE_MS } from "../../connections/slack/backfill.ts";
 import {
   chunkRecords,
   NATIVE_HOST_ID,
@@ -102,7 +104,7 @@ function connectNative(): void {
   }
   const currentPort = port;
   rememberHelper(false);
-  port.onMessage.addListener((message: { type?: string; batchId?: string; todayCount?: number; message?: string }) => {
+  port.onMessage.addListener((message: { type?: string; batchId?: string; todayCount?: number; message?: string; sources?: Array<{ sourceId: string; count: number }> }) => {
     if (port !== currentPort) return;
     helperReady = true;
     rememberHelper(true);
@@ -116,6 +118,13 @@ function connectNative(): void {
     }
     void updateQueue(async () => {
       if (message.type === "ack" && inFlight && message.batchId === inFlight.batchId) {
+        for (const source of message.sources ?? []) {
+          if (source.sourceId.startsWith("slack:")) {
+            const state = await chrome.storage.local.get("lastPage");
+            await chrome.storage.local.set({ [statsKey(source.sourceId)]: { count: source.count },
+              ...(state.lastPage?.sourceId === source.sourceId ? { lastPage: { ...state.lastPage, count: source.count } } : {}) });
+          }
+        }
         const remaining = queue.slice(inFlight.records.length);
         await chrome.storage.local.set({ pendingRecords: remaining });
         queue.splice(0, queue.length, ...remaining);
@@ -160,7 +169,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const stored = await chrome.storage.local.get(["slackHourBucket", "slackHourLoads"]);
       const loads = (stored.slackHourBucket === bucket ? Number(stored.slackHourLoads) || 0 : 0) + 1;
       await chrome.storage.local.set({ slackHourBucket: bucket, slackHourLoads: loads });
-      sendResponse({ ok: true, bucket, loads });
+      if (typeof message.sourceId === "string" && message.sourceId.startsWith("slack:")) {
+        const key = progressKey(message.sourceId);
+        const state = await chrome.storage.local.get(key);
+        const progress = readProgress(state[key], backfillRange(message.range), Date.now());
+        progress.batchLoads += 1;
+        if (slackManifest.pace.loadBudget != null && progress.batchLoads >= slackManifest.pace.loadBudget) progress.resumeAt = Date.now() + BACKFILL_PAUSE_MS;
+        await chrome.storage.local.set({ [key]: progress });
+        sendResponse({ ok: true, bucket, loads, progress });
+      } else sendResponse({ ok: true, bucket, loads });
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message?.type === "backfill-progress" && typeof message.sourceId === "string" && message.sourceId.startsWith("slack:")) {
+    updateQueue(async () => {
+      const key = progressKey(message.sourceId);
+      const state = await chrome.storage.local.get([key, statsKey(message.sourceId)]);
+      const progress = readProgress(state[key], backfillRange(message.range), Date.now());
+      if (typeof message.oldestAt === "string" && Number.isFinite(Date.parse(message.oldestAt))) {
+        if (!progress.oldestAt || Date.parse(message.oldestAt) < Date.parse(progress.oldestAt)) progress.oldestAt = message.oldestAt;
+      }
+      if (message.reachedBoundary === true) {
+        progress.reachedBoundary = true;
+        progress.boundaryKind = message.boundaryKind === "start" ? "start" : "range";
+      }
+      await chrome.storage.local.set({ [key]: progress });
+      sendResponse({ ok: true, progress, count: state[statsKey(message.sourceId)]?.count });
     }).catch(() => sendResponse({ ok: false }));
     return true;
   }
@@ -231,6 +265,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       inFlight = null;
       if (!port || !helperReady) throw new Error("helper disconnected");
       port.postMessage({ type: "forget", scope: message.scope, id: message.id });
+      const state = await chrome.storage.local.get(null);
+      const keys = Object.keys(state).filter((key) => message.scope === "source"
+        ? key === progressKey(message.id) || key === statsKey(message.id)
+        : message.id === "slack" && (key.startsWith("slackBackfill:") || key.startsWith("slackSourceStats:")));
+      await chrome.storage.local.set(Object.fromEntries(keys.map((key) => [key, null])));
       flush();
     }).then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false, message: "Could not forget saved records. Try again." }));
@@ -255,6 +294,8 @@ chrome.runtime.onInstalled.addListener(async () => {
   const defaults = {
     slackEnabled: false,
     paused: false,
+    slackBackfillEnabled: false,
+    slackBackfillRange: "30d",
     includeDms: false,
     includePrivate: false,
     todayCount: 0,

@@ -1,9 +1,12 @@
+import { backfillRange, statsKey, type BackfillRange } from "../../connections/slack/backfill.ts";
 import manifest from "../../connections/slack/connection.json";
 import { APP_NAME, type PageSnapshot } from "../../shared/src/index.ts";
 
 interface State {
   slackEnabled: boolean;
   paused: boolean;
+  slackBackfillEnabled: boolean;
+  slackBackfillRange: BackfillRange;
   includeDms: boolean;
   includePrivate: boolean;
   todayCount: number;
@@ -15,6 +18,8 @@ interface State {
 const empty: State = {
   slackEnabled: false,
   paused: false,
+  slackBackfillEnabled: false,
+  slackBackfillRange: "30d",
   includeDms: false,
   includePrivate: false,
   todayCount: 0,
@@ -40,7 +45,13 @@ if (risks) {
 
 async function readState(): Promise<State> {
   const stored = await chrome.storage.local.get(Object.keys(empty));
-  return { ...empty, ...stored };
+  const state = { ...empty, ...stored };
+  if (state.lastPage?.sourceId) {
+    const key = statsKey(state.lastPage.sourceId);
+    const stats = await chrome.storage.local.get(key);
+    if (typeof stats[key]?.count === "number") state.lastPage = { ...state.lastPage, count: stats[key].count };
+  }
+  return state;
 }
 
 function render(state: State): void {
@@ -52,7 +63,7 @@ function render(state: State): void {
   const error = document.querySelector<HTMLElement>("#pageError");
   if (title) title.textContent = page?.title || "Open a Slack channel to capture it.";
   if (url) url.textContent = page?.url || "";
-  if (count) count.textContent = page ? `${page.count} on this page` : "";
+  if (count) count.textContent = page ? `${page.count} saved from this channel` : "";
   if (coverage) coverage.textContent = page?.skipped || page?.coverage || "Nothing saved from this page yet.";
   if (error) {
     const message = page?.error || (state.slackPauseReason ? `Slack paused for today: ${state.slackPauseReason}` : "");
@@ -72,7 +83,15 @@ function render(state: State): void {
   if (dms instanceof HTMLInputElement) dms.checked = state.includeDms;
   if (priv instanceof HTMLInputElement) priv.checked = state.includePrivate;
   const pause = document.querySelector("#pause");
-  if (pause) pause.textContent = state.paused ? "Resume" : "Pause";
+  if (pause) pause.textContent = state.paused ? "Resume capture" : "Pause all capture";
+  const backfill = document.querySelector("#backfillToggle");
+  if (backfill instanceof HTMLButtonElement) {
+    backfill.textContent = state.slackBackfillEnabled ? "On" : "Off";
+    backfill.setAttribute("aria-pressed", String(state.slackBackfillEnabled));
+    backfill.disabled = !state.slackEnabled || state.paused;
+  }
+  const range = document.querySelector("#backfillRange");
+  if (range instanceof HTMLSelectElement) range.value = backfillRange(state.slackBackfillRange);
   const helper = document.querySelector("#helper");
   if (helper) {
     helper.textContent = state.helperConnected
@@ -115,6 +134,15 @@ document.querySelector("#pause")?.addEventListener("click", async () => {
   const state = await readState();
   await chrome.storage.local.set({ paused: !state.paused });
   await refresh();
+});
+
+document.querySelector("#backfillToggle")?.addEventListener("click", async () => {
+  const state = await readState();
+  await chrome.storage.local.set({ slackBackfillEnabled: !state.slackBackfillEnabled });
+  await refresh();
+});
+document.querySelector("#backfillRange")?.addEventListener("change", async (event) => {
+  if (event.target instanceof HTMLSelectElement) await chrome.storage.local.set({ slackBackfillRange: backfillRange(event.target.value) });
 });
 
 async function forget(scope: "source" | "connection"): Promise<void> {

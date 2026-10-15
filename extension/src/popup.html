@@ -26,6 +26,20 @@
       <p id="today" class="today">0 saved</p>
     </section>
 
+    <section>
+      <div class="row">
+        <h2>Automatic backfill</h2>
+        <button id="backfillToggle" type="button" class="toggle" aria-pressed="false">Off</button>
+      </div>
+      <label class="range" for="backfillRange">History to read</label>
+      <select id="backfillRange">
+        <option value="recent">Past 7 days</option>
+        <option value="30d">Past 30 days</option>
+        <option value="all">All available history</option>
+      </select>
+      <p class="hint">Visible messages are saved with backfill off. When on, it scrolls opened channels while you are away or have not used the tab for 30 seconds.</p>
+    </section>
+
     <section class="card">
       <div class="row">
         <h2>Slack</h2>
@@ -38,7 +52,7 @@
     </section>
 
     <section class="actions">
-      <button id="pause" type="button">Pause</button>
+      <button id="pause" type="button">Pause all capture</button>
       <button id="forgetPage" type="button">Forget this page</button>
       <button id="forgetSite" type="button" class="danger">Forget Slack</button>
     </section>

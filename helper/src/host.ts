@@ -10,7 +10,12 @@ export function handleHostMessage(db: RecordDatabase, filesRoot: string, message
   const body = message as { type?: string; batchId?: string; records?: unknown; coverage?: Coverage; scope?: string; id?: string };
   if (body.type === "records" && Array.isArray(body.records)) {
     const result = acceptRecords(db, filesRoot, body.records);
-    return { type: "ack", batchId: body.batchId, ...result, ids: result.ids };
+    const savedSources = db.sources("slack");
+    const sourceIds = (body.records as Array<{ source?: { id?: string } }>).map((r) => r?.source?.id)
+      .filter((id): id is string => typeof id === "string" && id.startsWith("slack:"));
+    const sources = [...new Set(sourceIds)].map((sourceId) => ({ sourceId,
+      count: savedSources.find((s) => s.sourceId === sourceId)?.recordCount ?? 0 }));
+    return { type: "ack", batchId: body.batchId, ...result, ids: result.ids, sources };
   }
   if (body.type === "coverage" && body.coverage && typeof body.coverage.sourceId === "string") {
     acceptCoverage(db, body.coverage);

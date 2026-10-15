@@ -25,6 +25,7 @@ export function page(rows: string, thread = ""): string {
 class Events {
   listeners: Array<(...args: any[]) => any> = [];
   addListener = (listener: (...args: any[]) => any) => { this.listeners.push(listener); };
+  removeListener = (listener: (...args: any[]) => any) => { this.listeners = this.listeners.filter((item) => item !== listener); };
   emit(...args: any[]) { return this.listeners.map((listener) => listener(...args)); }
 }
 
@@ -85,6 +86,8 @@ export class ExtensionFixture {
   onSend: ((message: any) => void) | null = null;
   beforeStorageSet: ((values: Record<string, unknown>) => Promise<void>) | null = null;
   beforeStorageGet: ((keys: string[]) => Promise<void>) | null = null;
+  contentContextError: "storage" | "message" | null = null;
+  contentContextCalls = 0;
   height = 2000;
   visibleHeight = 400;
   top = 1000;
@@ -97,14 +100,14 @@ export class ExtensionFixture {
   constructor(html = page(row(100) + row(300)), options: { hidden?: boolean; settings?: Record<string, any>; url?: string; hostMode?: HostMode } = {}) {
     this.dom = parseHTML(html);
     Object.defineProperty(this.dom.document, "hidden", { value: options.hidden ?? false, writable: true });
-    this.storage = { slackEnabled: true, slackHourLoads: 0, ...options.settings };
+    this.storage = { slackEnabled: true, slackBackfillEnabled: true, slackHourLoads: 0, ...options.settings };
     this.url = options.url ?? SLACK_URL;
     this.hostMode = options.hostMode ?? "healthy";
     this.configureList();
   }
   url: string;
 
-  get list() { return this.dom.document.querySelector("[data-qa='virtual-list']")!; }
+  get list() { return this.dom.document.querySelector("[data-qa='virtual-list'], .p-message_pane .c-scrollbar__hider")!; }
   configureList() {
     const list = this.list;
     if (!list) return;
@@ -146,8 +149,8 @@ export class ExtensionFixture {
 
   private storageApi(changes: Events) {
     return { local: {
-      get: async (keys: string | string[]) => {
-        const names = typeof keys === "string" ? [keys] : keys;
+      get: async (keys: string | string[] | null) => {
+        const names = keys == null ? Object.keys(this.storage) : typeof keys === "string" ? [keys] : keys;
         await this.beforeStorageGet?.(names);
         return structuredClone(Object.fromEntries(names.filter((key) => key in this.storage).map((key) => [key, this.storage[key]])));
       },
@@ -231,19 +234,38 @@ export class ExtensionFixture {
 
   async startContent() {
     const owner = this;
+    const contentStorage = this.storageApi(this.contentChanges);
+    const readStorage = contentStorage.local.get;
+    contentStorage.local.get = async (keys: string | string[] | null) => {
+      this.contentContextCalls += 1;
+      if (this.contentContextError === "storage") throw new Error("Extension context invalidated.");
+      return readStorage(keys);
+    };
     const window = this.contentWindow ??= {
       addEventListener: (type: string, handler: (event: Event) => void) => {
         const handlers = this.inputHandlers.get(type) ?? [];
         handlers.push(handler); this.inputHandlers.set(type, handlers);
         this.dom.window.addEventListener(type, handler);
       },
+      removeEventListener: (type: string, handler: (event: Event) => void) => {
+        this.inputHandlers.set(type, (this.inputHandlers.get(type) ?? []).filter((item) => item !== handler));
+        this.dom.window.removeEventListener(type, handler);
+      },
       setTimeout: this.clock.setTimeout, clearTimeout: this.clock.clearTimeout,
     };
     runInNewContext((await ExtensionFixture.getBundles()).content, {
       ...this.globals(), window, document: this.dom.document, location: { href: this.url },
       HTMLElement: this.dom.window.HTMLElement,
-      chrome: { storage: this.storageApi(this.contentChanges), runtime: { sendMessage: (message: any) => this.send(message) } },
-      MutationObserver: class { constructor(callback: () => void) { owner.observers.push(callback); } observe() {} },
+      chrome: { storage: contentStorage, runtime: { sendMessage: (message: any) => {
+        this.contentContextCalls += 1;
+        if (this.contentContextError === "message") throw new Error("Extension context invalidated.");
+        return this.send(message);
+      } } },
+      MutationObserver: class {
+        constructor(readonly callback: () => void) { owner.observers.push(callback); }
+        observe() {}
+        disconnect() { owner.observers = owner.observers.filter((callback) => callback !== this.callback); }
+      },
     });
     await this.clock.advance(0);
   }
