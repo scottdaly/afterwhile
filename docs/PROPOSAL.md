@@ -350,9 +350,17 @@ From a 6 October 2026 probe on a corporate Mac, as a regular attendee whose down
 - An AI asked "what was discussed in #<channel> yesterday?" answers from `search`/`recent` and cites message URLs.
 - `recent` with checkpoints returns only new messages on the second call; `coverage` explains gaps in plain words.
 
+**M2, Teams meeting transcripts**
+- Teams starts off. Enabling it shows the risks and requests Teams/SharePoint host access at runtime; capture runs only in transcript pages/frames the person opens, including Recap's iframe and Stream.
+- Each identifiable transcript part is a separate source with stable position-based record ids, speaker, offset, text and distinct event records. Unidentifiable parts or changed markup report “capture stopped working” and save nothing.
+- Reveal scrolling waits for idle, moves at most half a viewport, checks that rows redraw in background tabs, and restores the reading position safely. Positions 1..setsize with no gaps alone prove completeness; partial captures report exact gap ranges.
+- Copy-blocked or sensitivity-labelled pages stop capture. No transcript downloads, hidden state, page tokens, Graph or SharePoint API calls.
+- The popup shows the current transcript's saved lines, coverage and observed parts; MCP sources/search/recent/get/coverage and Markdown work for transcripts.
+- Synthetic tests cover complete and virtualized parts, skipped ranges, two parts, events, changed markup, Recap frames and Stream; Slack's tests still pass. A content-free work-Mac trial checks the unverified live behavior before claiming M2 proven there.
+
 ## Out of scope until asked
 
-The selector data lane and signing, user scripts, the repair-loop tooling, Store submission, Amazon, Teams (M2), anything Midlight-specific, and desktop-app capture.
+The selector data lane and signing, user scripts, the repair-loop tooling, Store submission, Amazon, anything Midlight-specific, and desktop-app capture.
 
 ## How to work
 

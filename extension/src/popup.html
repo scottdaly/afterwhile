@@ -13,7 +13,7 @@
     </header>
 
     <section>
-      <h2>This page</h2>
+      <h2>Slack page</h2>
       <p id="pageTitle" class="title">Checking this computer…</p>
       <p id="pageUrl" class="url"></p>
       <p id="pageCount" class="meta"></p>
@@ -49,6 +49,17 @@
       <label class="check"><input id="includeDms" type="checkbox" /> DMs</label>
       <label class="check"><input id="includePrivate" type="checkbox" /> Private channels</label>
       <p class="hint">DMs and private channels stay off until you turn them on here.</p>
+    </section>
+
+    <section class="card">
+      <div class="row"><h2>Teams transcripts</h2><button id="teamsToggle" type="button" class="toggle" aria-pressed="false">Turn on</button></div>
+      <ul id="teamsRisks"></ul>
+      <p id="teamsStatus" class="coverage">Open a meeting transcript in Recap or Stream.</p>
+      <p id="teamsError" class="error" hidden></p>
+      <ul id="teamsParts"></ul>
+      <p class="hint">Parts listed here have been opened in this tab. Other parts may exist. Reveal scrolling waits while you use the tab.</p>
+      <button id="forgetTeamsPart" type="button">Forget current part</button>
+      <button id="forgetTeams" type="button" class="danger">Forget Teams</button>
     </section>
 
     <section class="actions">

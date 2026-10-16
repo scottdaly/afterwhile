@@ -10,16 +10,16 @@ export function handleHostMessage(db: RecordDatabase, filesRoot: string, message
   const body = message as { type?: string; batchId?: string; records?: unknown; coverage?: Coverage; scope?: string; id?: string };
   if (body.type === "records" && Array.isArray(body.records)) {
     const result = acceptRecords(db, filesRoot, body.records);
-    const savedSources = db.sources("slack");
+    const savedSources = db.sources();
     const sourceIds = (body.records as Array<{ source?: { id?: string } }>).map((r) => r?.source?.id)
-      .filter((id): id is string => typeof id === "string" && id.startsWith("slack:"));
+      .filter((id): id is string => typeof id === "string" && (id.startsWith("slack:") || id.startsWith("teams:")));
     const sources = [...new Set(sourceIds)].map((sourceId) => ({ sourceId,
-      count: savedSources.find((s) => s.sourceId === sourceId)?.recordCount ?? 0 }));
+      count: savedSources.find((s) => s.sourceId === sourceId)?.recordCount ?? 0, coverage: db.coverage(sourceId) }));
     return { type: "ack", batchId: body.batchId, ...result, ids: result.ids, sources };
   }
   if (body.type === "coverage" && body.coverage && typeof body.coverage.sourceId === "string") {
     acceptCoverage(db, body.coverage);
-    return { type: "ack", todayCount: db.todayCount() };
+    return { type: "ack", todayCount: db.todayCount(), sources: [{ sourceId: body.coverage.sourceId, count: db.getSource(body.coverage.sourceId).length, coverage: db.coverage(body.coverage.sourceId) }] };
   }
   if (body.type === "forget" && (body.scope === "source" || body.scope === "connection") && typeof body.id === "string") {
     const result = forgetSaved(db, filesRoot, body.scope, body.id);

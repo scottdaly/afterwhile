@@ -1,0 +1,15 @@
+{
+  "root": "#OneTranscript",
+  "container": "#scrollToTargetTargetedFocusZone",
+  "line": "[id^='sub-entry-'][role='listitem']",
+  "group": "[id^='entry-'][role='group']",
+  "text": "[class*='entryText-']",
+  "event": "[class*='eventText-']",
+  "frame": "iframe#xplatIframe",
+  "selectedPart": "select[aria-label*='ranscript'] option:checked, [role='tab'][aria-selected='true'][data-transcript-id], [role='option'][aria-selected='true'][data-transcript-id]",
+  "documentLink": "a[href*='stream.aspx']",
+  "protection": "[data-copy-blocked='true'], [data-copy-allowed='false'], [data-sensitivity-label], [class*='sensitivityLabel'], [aria-label*='Sensitivity'], [aria-label*='sensitivity']",
+  "alert": "[role='alert'], [role='alertdialog'], [role='status']",
+  "login": "input[type='password'], form[action*='login']",
+  "captcha": "iframe[src*='captcha'], [id*='captcha']"
+}

@@ -18,13 +18,16 @@ export function renderDay(options: {
   records: CaptureRecord[];
 }): string {
   const lines: string[] = [`# ${options.title}`, "", options.url, "", options.day, ""];
+  if (options.records.some((r) => r.connection === "teams")) lines.push("Offsets are relative to this transcript part. Meeting date unknown; file date is the first capture date.", "");
   const visible = options.records
     .filter((record) => !record.deleted)
-    .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : a.occurredAt > b.occurredAt ? 1 : 0));
+    .sort((a, b) => a.connection === "teams" && b.connection === "teams" ? (a.position ?? 0) - (b.position ?? 0) : (a.occurredAt < b.occurredAt ? -1 : a.occurredAt > b.occurredAt ? 1 : 0));
   for (const record of visible) {
     const who = record.author?.name ?? "Unknown";
     const edited = record.revision > 1 || record.fields.edited === true ? " (edited)" : "";
-    lines.push(`## ${localTime(record.occurredAt)} ${who}${edited}`, "");
+    if (record.connection === "teams") {
+      lines.push(`## ${record.fields.offset} · ${record.kind === "transcript-event" ? "Event" : who}${edited}`, "");
+    } else lines.push(`## ${localTime(record.occurredAt)} ${who}${edited}`, "");
     lines.push(record.text, "");
     if (record.fields.replyCount) lines.push(`Replies: ${record.fields.replyCount}`, "");
     if (typeof record.fields.threadTs === "string" && record.fields.threadTs) {

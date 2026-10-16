@@ -1,3 +1,4 @@
+import { exactCoverage } from "../../shared/src/coverage.ts";
 import { rmSync } from "fs";
 import path from "path";
 import { sourceSlug, type CaptureRecord, type Coverage } from "../../shared/src/index.ts";
@@ -11,14 +12,23 @@ export interface AcceptResult extends InsertSummary {
 }
 
 export function acceptRecords(db: RecordDatabase, filesRoot: string, records: unknown[]): AcceptResult {
-  const valid = records.filter(isCaptureRecord);
+  const valid = records.filter(isCaptureRecord).filter((record) => {
+    if (record.connection !== "teams") return true;
+    const previous = db.coverage(record.source.id);
+    const expected = record.fields?.expected;
+    const mismatch = previous?.reason === "transcript extent changed" || (previous?.expected != null && expected !== previous.expected);
+    if (mismatch && typeof expected === "number") {
+      acceptCoverage(db, { sourceId: record.source.id, expected, have: 0, gaps: [], complete: false, reason: "transcript extent changed", updatedAt: record.capturedAt });
+    }
+    return !mismatch;
+  });
   const summary = db.insertRecords(valid);
   // A retry may follow a crash after SQLite committed but before Markdown was written.
   refreshRecords(db, filesRoot, valid.map((record) => record.id));
   // Coverage can arrive before the queued batch reaches the helper.
-  for (const sourceId of new Set(valid.filter((record) => record.connection === "slack").map((record) => record.source.id))) {
+  for (const sourceId of new Set(valid.filter((record) => record.connection === "slack" || record.connection === "teams").map((record) => record.source.id))) {
     const coverage = db.coverage(sourceId);
-    if (coverage && coverage.expected == null) acceptCoverage(db, coverage);
+    if (coverage) acceptCoverage(db, coverage);
   }
   log(
     `records new=${summary.inserted} revisions=${summary.revisions} deleted=${summary.deleted} unchanged=${summary.unchanged} rejected=${records.length - valid.length} ids=${summary.ids.join(",")}`,
@@ -36,8 +46,18 @@ export function acceptCoverage(db: RecordDatabase, coverage: Coverage): void {
   const current = slack
     ? { ...coverage, have: saved?.recordCount ?? 0 }
     : coverage;
-  db.updateCoverage(current);
-  log(`coverage source=${current.sourceId} have=${current.have} complete=${current.complete} reason=${current.reason ?? ""}`);
+  let savedCoverage = current;
+  if (coverage.sourceId.startsWith("teams:") && coverage.expected != null) {
+    const previous = db.coverage(coverage.sourceId);
+    const positions = db.getSource(coverage.sourceId).map((r) => r.position!).filter((p) => p != null);
+    const invalid = previous?.reason === "transcript extent changed" || coverage.reason === "transcript extent changed"
+      || (previous?.expected != null && previous.expected !== coverage.expected)
+      || positions.some((p) => p < 1 || p > coverage.expected!);
+    savedCoverage = exactCoverage(coverage.sourceId, coverage.expected, positions, coverage.reason, new Date(coverage.updatedAt));
+    if (invalid) savedCoverage = { ...savedCoverage, have: new Set(positions).size, complete: false, reason: "transcript extent changed" };
+  }
+  db.updateCoverage(savedCoverage);
+  log(`coverage source=${savedCoverage.sourceId} have=${savedCoverage.have} complete=${savedCoverage.complete} reason=${savedCoverage.reason ?? ""}`);
 }
 
 export function forgetSaved(
