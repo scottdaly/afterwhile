@@ -6,13 +6,14 @@ It is a Chrome extension plus one local program. The extension reads pages that 
 
 Nothing here is encrypted beyond what the operating system does for the disk.
 
-This repository is M0 and M1: Slack capture, and MCP tools `search`, `recent`, `get`, `sources`, and `coverage`.
+This repository includes Slack capture (M0/M1), the Teams transcript connection (M2, awaiting its live work-Mac trial), and MCP tools `search`, `recent`, `get`, `sources`, and `coverage`.
 
 ## Layout
 
 - `extension/` Chrome extension (Manifest V3). Load the built folder `extension/dist`.
 - `helper/` the `afterwhile` program: `host`, `mcp`, `install`, `uninstall`.
 - `shared/` types and the product name.
+- `connections/teams/` Teams Recap/Stream transcripts, synthetic fixtures, and explicit live-validation gaps.
 - `connections/slack/` the Slack connection, synthetic fixtures, and notes on selectors that are not yet checked against a live Slack page.
 
 The product name is defined once, in `shared/src/constants.ts`.
@@ -74,8 +75,16 @@ The channel and thread selectors have been tested on one modern Slack layout; ot
 
 The extension does not run in Incognito. It does not request every site at install. It only scrolls a channel you already opened, and only when you are not using that tab.
 
+## Try Teams transcripts
+
+Build/install the helper and load `extension/dist` as above. In the popup, read the Teams risks and turn Teams on; Chrome requests access to Teams web and SharePoint at that point. Open a transcript you can read in a meeting's Recap or Stream. Rendered rows save immediately; reveal scrolling waits for idle or a background tab. Open each part yourself. The Teams section lists observed parts, database-saved lines and exact complete/partial coverage with gaps. Forgetting a Teams part or site turns Teams capture off to prevent immediate recapture; turn it back on when you want to capture again.
+
+Your employer may not allow copying meeting content or giving it to AI tools. Explicit copy blocks, recognized sensitivity labels and unrecognized visible page notices stop capture. Teams defaults off, and pause applies to both connections. Nothing downloads transcripts or calls their APIs.
+
+The implementation needs its first live extension trial, especially part identity, localized time labels and protection markers; read [Teams notes](connections/teams/NOTES.md) before enabling it. Both views must expose an explicit part identity; a missing part identity or changed row markup reports “capture stopped working”. Per-part offsets are authoritative; meeting dates are unknown, so Teams date filters and file dates use first-capture time. Completeness of an opened part does not prove every meeting part was opened.
+
 ## Tests
 
-`bun test` type-checks shared, helper, extension and test code, then exercises synthetic Slack HTML, the real content script and service worker with fake timers, helper ingest, SQLite/Markdown, missing-host and crash replay, and the official MCP SDK client. It also compiles and launches the helper with Chrome's native-host arguments and framed stdio. Tests never contact Slack or write the real browser registry; helper paths and logs use temporary directories.
+`bun test` type-checks shared, helper, extension and test code, then exercises synthetic Slack and Teams HTML, the real content script and service worker with fake timers, helper ingest, SQLite/Markdown, missing-host and crash replay, and the official MCP SDK client. It also compiles and launches the helper with Chrome's native-host arguments and framed stdio. Tests never contact Slack or write the real browser registry; helper paths and logs use temporary directories.
 
 Checkpoint reads page in database insertion order and advance only to the last returned row. Browser capture timestamps do not control this cursor. Existing databases migrate automatically; legacy time checkpoints replay once to avoid skipping records. Ordinary `recent` reads and search still return newest message times first.

@@ -157,16 +157,18 @@ export class RecordDatabase {
   private insertOne(record: CaptureRecord): "new" | "revision" | "deleted" | "unchanged" {
     if (!isSafeConnection(record.connection) || !record.id || !record.source?.id) return "unchanged";
     const latest = this.latestRow(record.id);
+    if (latest && record.connection === "teams") record = { ...record, occurredAt: latest.occurred_at };
+    const metadataSame = record.connection !== "teams" || (latest && latest.kind === record.kind && latest.position === record.position && latest.author_name === (record.author?.name ?? null) && latest.fields === JSON.stringify(record.fields));
     if (record.deleted && !latest) return "unchanged";
     if (
-      latest &&
+      latest && metadataSame &&
       latest.text === record.text &&
       Boolean(latest.deleted) === record.deleted &&
       latest.source_title === record.source.title
     ) {
       return "unchanged";
     }
-    if (latest && latest.text === record.text && Boolean(latest.deleted) === record.deleted) {
+    if (latest && metadataSame && latest.text === record.text && Boolean(latest.deleted) === record.deleted) {
       this.db
         .query(`UPDATE records SET source_title = ?, source_url = ? WHERE record_id = ? AND revision = ?`)
         .run(record.source.title, record.source.url, record.id, latest.revision);

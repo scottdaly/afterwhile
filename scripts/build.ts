@@ -24,6 +24,7 @@ rmSync(dist, { recursive: true, force: true });
 mkdirSync(path.join(dist, "icons"), { recursive: true });
 
 await bundle(path.join(root, "extension/src/content-slack.ts"), path.join(dist, "content-slack.js"), "iife");
+await bundle(path.join(root, "extension/src/content-teams.ts"), path.join(dist, "content-teams.js"), "iife");
 await bundle(path.join(root, "extension/src/popup.ts"), path.join(dist, "popup.js"), "iife");
 await bundle(path.join(root, "extension/src/service-worker.ts"), path.join(dist, "service-worker.js"), "esm");
 
@@ -38,7 +39,7 @@ const manifest = {
   description: "Saves what you read in web apps you choose to your computer, so your AI tools can search it.",
   incognito: "not_allowed",
   permissions: ["storage", "nativeMessaging", "scripting", "idle"],
-  optional_host_permissions: ["https://app.slack.com/*"],
+  optional_host_permissions: ["https://app.slack.com/*", "https://teams.cloud.microsoft/*", "https://*.sharepoint.com/*"],
   background: { service_worker: "service-worker.js", type: "module" },
   action: {
     default_popup: "popup.html",

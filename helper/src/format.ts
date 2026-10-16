@@ -20,7 +20,7 @@ export function formatRecord(record: StoredRecord, query?: string): string {
   return [
     record.source.title,
     record.source.url,
-    `${record.occurredAt} · ${who}`,
+    record.connection === "teams" ? `${record.fields.offset} into part · ${record.kind === "transcript-event" ? "Event" : who} · position ${record.position} · meeting date unknown (captured ${record.occurredAt})` : `${record.occurredAt} · ${who}`,
     body,
     `id ${record.id}`,
   ].join("\n");

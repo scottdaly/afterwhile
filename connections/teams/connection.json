@@ -1,0 +1,19 @@
+{
+  "id": "teams",
+  "version": "0.1.0",
+  "title": "Teams meeting transcripts",
+  "sites": [
+    { "match": "https://teams.cloud.microsoft/*", "frames": true },
+    { "match": "https://*.sharepoint.com/*", "frames": true }
+  ],
+  "kinds": ["transcript-line", "transcript-event"],
+  "fields": { "offsetSeconds": "number", "offset": "string", "part": "string", "expected": "number", "timeBasis": "capture (meeting date unknown)" },
+  "pace": { "reveal": true, "loadBudget": null },
+  "defaults": { "enabled": false },
+  "risks": [
+    "Saves displayed transcript lines from meetings you open, while you are away or idle.",
+    "Your employer may not allow copying meeting content or giving it to AI tools.",
+    "Site terms may restrict automated reading. This connection has only been probed on one setup.",
+    "Saved transcripts stay on this computer, readable by tools you connect. Protection labels and copy restrictions stop capture when recognized; unrecognized protections remain a risk."
+  ]
+}

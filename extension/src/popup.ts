@@ -1,3 +1,4 @@
+import teamsManifest from "../../connections/teams/connection.json";
 import { backfillRange, statsKey, type BackfillRange } from "../../connections/slack/backfill.ts";
 import manifest from "../../connections/slack/connection.json";
 import { APP_NAME, type PageSnapshot } from "../../shared/src/index.ts";
@@ -102,6 +103,7 @@ function render(state: State): void {
 
 async function refresh(): Promise<void> {
   render(await readState());
+  await renderTeams();
 }
 
 document.querySelector("#slackToggle")?.addEventListener("click", async () => {
@@ -181,3 +183,60 @@ chrome.storage.onChanged.addListener(() => {
 });
 
 void refresh();
+
+for (const risk of teamsManifest.risks) {
+  const li = document.createElement("li"); li.textContent = risk; document.querySelector("#teamsRisks")?.append(li);
+}
+async function teamsState(): Promise<Record<string, any>> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  const key = `teamsTab:${tab?.id}`;
+  const stored = await chrome.storage.local.get(["teamsEnabled", "teamsPauseReason", "teamsBlockedUntil", "paused", key]);
+  const page = stored[key];
+  return { ...stored, page: page && tab?.url && page.topUrl === tab.url ? page : null };
+}
+async function renderTeams() {
+  const state = await teamsState();
+  const toggle = document.querySelector<HTMLButtonElement>("#teamsToggle")!;
+  toggle.textContent = state.teamsEnabled ? "On" : "Turn on";
+  toggle.setAttribute("aria-pressed", String(Boolean(state.teamsEnabled)));
+  const status = document.querySelector("#teamsStatus")!;
+  status.textContent = !state.teamsEnabled ? "Teams capture off" : state.paused ? "All capture paused" : state.page?.reason ?? "Open a meeting transcript in Recap or Stream.";
+  const error = document.querySelector<HTMLElement>("#teamsError")!;
+  error.textContent = state.page?.error || (state.teamsBlockedUntil > Date.now() ? state.teamsPauseReason : "") || "";
+  error.hidden = !error.textContent;
+  const list = document.querySelector("#teamsParts")!;
+  list.replaceChildren();
+  for (const part of state.page?.parts ?? []) {
+    const li = document.createElement("li");
+    const c = part.savedCoverage;
+    const gaps = c?.gaps?.map(([a, b]: [number, number]) => a === b ? a : `${a}–${b}`).join(", ");
+    li.textContent = `${part.source.title}: ${part.count ?? 0} lines saved · ${c?.complete ? "Complete" : c ? `${c.have} of ${c.expected}; gaps ${gaps || "not established"}` : "Waiting for helper coverage"}`;
+    list.append(li);
+  }
+}
+document.querySelector("#teamsToggle")?.addEventListener("click", async () => {
+  const state = await teamsState();
+  const enabled = !state.teamsEnabled;
+  // Keep the permission request on the user's click, as with Slack.
+  if (enabled && !await chrome.permissions.request({ origins: teamsManifest.sites.map((site) => site.match) })) return;
+  await chrome.storage.local.set({ teamsEnabled: enabled });
+  const response = await chrome.runtime.sendMessage({ type: "teams-enabled", enabled });
+  if (!response?.ok) {
+    await chrome.storage.local.set({ teamsEnabled: false });
+    const error = document.querySelector<HTMLElement>("#teamsError")!; error.hidden = false; error.textContent = "Could not enable Teams capture. Reload the extension and try again.";
+    return;
+  }
+  await refresh();
+});
+async function forgetTeams(scope: "source" | "connection") {
+  const state = await teamsState();
+  const id = scope === "source" ? state.page?.sourceId : "teams";
+  if (!id || !confirm(`Forget saved ${scope === "source" ? "transcript part" : "Teams transcripts"}? This cannot be undone.`)) return;
+  const response = await chrome.runtime.sendMessage({ type: "forget", scope, id });
+  if (!response?.ok) {
+    const error = document.querySelector<HTMLElement>("#teamsError")!; error.hidden = false; error.textContent = response?.message ?? "Could not forget saved records.";
+  } else await refresh();
+}
+document.querySelector("#forgetTeamsPart")?.addEventListener("click", () => void forgetTeams("source"));
+document.querySelector("#forgetTeams")?.addEventListener("click", () => void forgetTeams("connection"));

@@ -78,6 +78,7 @@ export class ExtensionFixture {
   workerChanges = new Events();
   installed = new Events();
   tabUpdates = new Events();
+  tabRemovals = new Events();
   runtimeMessages = new Events();
   hostMode: HostMode = "healthy";
   tabs: any[] = [{ id: 1, incognito: false }, { id: 2, incognito: true }];
@@ -95,9 +96,10 @@ export class ExtensionFixture {
   private workerTimers: number[] = [];
   private contentWindow: any;
   private inputHandlers = new Map<string, Array<(event: Event) => void>>();
-  private static bundles: Promise<{ content: string; worker: string }> | null = null;
+  private static bundles: Promise<{ content: string; worker: string; teams: string }> | null = null;
 
-  constructor(html = page(row(100) + row(300)), options: { hidden?: boolean; settings?: Record<string, any>; url?: string; hostMode?: HostMode } = {}) {
+  constructor(html = page(row(100) + row(300)), options: { hidden?: boolean; settings?: Record<string, any>; url?: string; hostMode?: HostMode; connection?: "slack" | "teams" } = {}) {
+    this.contentEntry = options.connection ?? "slack";
     this.dom = parseHTML(html);
     Object.defineProperty(this.dom.document, "hidden", { value: options.hidden ?? false, writable: true });
     this.storage = { slackEnabled: true, slackBackfillEnabled: true, slackHourLoads: 0, ...options.settings };
@@ -106,8 +108,9 @@ export class ExtensionFixture {
     this.configureList();
   }
   url: string;
+  contentEntry: "slack" | "teams";
 
-  get list() { return this.dom.document.querySelector("[data-qa='virtual-list'], .p-message_pane .c-scrollbar__hider")!; }
+  get list() { return this.dom.document.querySelector("[data-qa='virtual-list'], .p-message_pane .c-scrollbar__hider, #scrollToTargetTargetedFocusZone")!; }
   configureList() {
     const list = this.list;
     if (!list) return;
@@ -128,11 +131,11 @@ export class ExtensionFixture {
   }
 
   private static getBundles() {
-    return this.bundles ??= Promise.all(["content-slack", "service-worker"].map(async (entry) => {
+    return this.bundles ??= Promise.all(["content-slack", "service-worker", "content-teams"].map(async (entry) => {
       const result = await Bun.build({ entrypoints: [path.join(import.meta.dir, `../extension/src/${entry}.ts`)], target: "browser", format: "iife" });
       if (!result.success) throw new Error(result.logs.join("\n"));
       return result.outputs[0]!.text();
-    })).then(([content, worker]) => ({ content, worker }));
+    })).then(([content, worker, teams]) => ({ content, worker, teams }));
   }
 
   private globals() {
@@ -143,7 +146,10 @@ export class ExtensionFixture {
     }
     const math = Object.create(Math);
     math.random = () => 0.5; // A 1500ms reader pause.
-    return { Date: FixtureDate, Math: math, URL, crypto, TextEncoder,
+    return { Date: FixtureDate, Math: math, URL, crypto: { randomUUID: () => crypto.randomUUID(), subtle: {
+        // WebCrypto finishes on a native task; keep hashing deterministic on the fake clock.
+        digest: async (_algorithm: string, data: Uint8Array) => new Uint8Array(Bun.CryptoHasher.hash("sha256", data)).buffer,
+      } }, TextEncoder,
       console: { log() {}, error: (...args: unknown[]) => this.errors.push(args) } };
   }
 
@@ -156,7 +162,7 @@ export class ExtensionFixture {
       },
       set: async (values: Record<string, unknown>) => this.setStorage(values),
     }, session: {
-      get: async (key: string) => structuredClone({ [key]: this.sessionStorage[key] }),
+      get: async (key: string | string[]) => structuredClone(Object.fromEntries((Array.isArray(key) ? key : [key]).map((k) => [k, this.sessionStorage[k]]))),
       set: async (values: Record<string, unknown>) => {
         const updates = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: this.sessionStorage[key], newValue: value }]));
         Object.assign(this.sessionStorage, structuredClone(values));
@@ -187,6 +193,7 @@ export class ExtensionFixture {
     this.runtimeMessages = new Events();
     this.installed = new Events();
     this.tabUpdates = new Events();
+    this.tabRemovals = new Events();
     const chrome = {
       storage: this.storageApi(this.workerChanges),
       runtime: { onMessage: this.runtimeMessages, onInstalled: this.installed, connectNative: () => this.connectHost() },
@@ -197,7 +204,7 @@ export class ExtensionFixture {
         unregisterContentScripts: async () => { this.registered = []; },
         executeScript: async (details: any) => { this.injections.push(details); },
       },
-      tabs: { onRemoved: new Events(), onUpdated: this.tabUpdates, query: async () => this.tabs },
+      tabs: { onRemoved: this.tabRemovals, onUpdated: this.tabUpdates, query: async () => this.tabs },
       idle: { setDetectionInterval() {}, queryState: (_seconds: number, reply: (state: string) => void) => reply("active") },
     };
     runInNewContext((await ExtensionFixture.getBundles()).worker, {
@@ -227,7 +234,7 @@ export class ExtensionFixture {
     return port;
   }
 
-  send(message: any, sender = { tab: { id: 1, incognito: false } }): Promise<any> {
+  send(message: any, sender: { tab: { id: number; incognito: boolean }; frameId?: number } = { tab: { id: 1, incognito: false } }): Promise<any> {
     this.onSend?.(message);
     return new Promise((resolve) => { this.runtimeMessages.emit(message, sender, resolve); });
   }
@@ -253,7 +260,7 @@ export class ExtensionFixture {
       },
       setTimeout: this.clock.setTimeout, clearTimeout: this.clock.clearTimeout,
     };
-    runInNewContext((await ExtensionFixture.getBundles()).content, {
+    runInNewContext((await ExtensionFixture.getBundles())[this.contentEntry === "teams" ? "teams" : "content"], {
       ...this.globals(), window, document: this.dom.document, location: { href: this.url },
       HTMLElement: this.dom.window.HTMLElement,
       chrome: { storage: contentStorage, runtime: { sendMessage: (message: any) => {
